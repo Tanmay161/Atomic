@@ -1,5 +1,0 @@
-/*
-    Mutliline string using triple quotes
-    """ string """
-    Mutliline strings can have new lines.
-*/
