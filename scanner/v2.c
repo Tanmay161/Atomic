@@ -14,6 +14,7 @@
     107: Invalid float
     108: New line not allowed in single line string
     109: Unclosed multiline comment
+    110: Memory allocation failed for string intern pool
 */
 
 typedef enum {
