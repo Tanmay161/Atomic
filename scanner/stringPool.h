@@ -17,6 +17,7 @@ typedef struct {
 } Pool;
 
 extern Pool string_pool;
+void init_string_pool();
 char *insert_return_ptr_to_string();
 
 #endif

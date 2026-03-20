@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include "stringPool.h"
 
 /* ===== Error Codes =====
     101: Failed to open input file  
@@ -89,6 +90,8 @@ Token scan_identifier(Scanner *s);
 Token next_token(Scanner *s);
 
 int main() {
+    // Initialize string intern pool
+    init_string_pool();
     // Create scanner
     Scanner scanner;
     scanner.stream = loadInput("./scanner/input.txt");
@@ -283,7 +286,7 @@ Token scan_identifier(Scanner *s) {
 
     // Construct info
     IdentifierInfo info = (IdentifierInfo) {
-        .start = start,
+        .start = insert_return_ptr_to_string(start, len),
         .len = len
     };
 
@@ -435,7 +438,7 @@ Token scan_string(Scanner *s) {
     string[len] = '\0';
 
     StringInfo info = (StringInfo) {
-        .string = string,
+        .string = insert_return_ptr_to_string(string, len),
         .len = len
     };
 
