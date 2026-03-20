@@ -3,21 +3,20 @@
 #define STRINGPOOL_H
 #include <stdlib.h>
 
-typedef struct {
+typedef struct Node {
     char *string;
+    Node *next;
+    uint32_t hash;
     size_t len;
-} StringObject;
+} Node;
 
-typedef struct Block {
-    StringObject **data;
-    struct Block *next;
-    size_t used;
+typedef struct {
+    Node **buckets;
+    int items;
     size_t capacity;
-} Block;
+} Pool;
 
-void clean_up();
-int is_in_pool();
-size_t add_return_address_in_pool(char *string);
-extern Block string_pool;
+extern Pool string_pool;
+char *insert_return_ptr_to_string();
 
 #endif
