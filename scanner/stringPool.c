@@ -73,7 +73,7 @@ char *insert_return_ptr_to_string(char *string, size_t len) {
     }
     // Get index of the bucket to jump to
     uint32_t hash = get_hash(string, len);
-    // We use bitwise AND as it is much faster
+    // We use bitwise AND as it is faster than modulo (%)
     size_t index = hash & (string_pool->capacity - 1);
 
     Node *bucket = string_pool->buckets[index];
