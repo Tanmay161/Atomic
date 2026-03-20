@@ -4,12 +4,12 @@
 #include <stdlib.h>
 
 typedef struct {
-    char * string;
+    char *string;
     size_t len;
 } StringObject;
 
 typedef struct Block {
-    StringObject *data;
+    StringObject **data;
     struct Block *next;
     size_t used;
     size_t capacity;
@@ -17,6 +17,7 @@ typedef struct Block {
 
 void clean_up();
 int is_in_pool();
+size_t add_return_address_in_pool(char *string);
 extern Block string_pool;
 
 #endif
