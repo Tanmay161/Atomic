@@ -145,6 +145,7 @@ int main()
 
     Token cur = next_token(&scanner);
 
+    // Debugging purposes
     /* if (cur.type == IDENTIFIER) {
         for (size_t i = 0; i < cur.object.identifierinfo.len; i++) {
             printf("%c", cur.object.identifierinfo.start[i]);
