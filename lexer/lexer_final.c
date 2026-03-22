@@ -75,7 +75,8 @@ typedef enum
     FALSE,
     NOT,
 
-    TOKEN_EOF
+    TOKEN_EOF,
+    TOKEN_ERROR
 } TokenType;
 
 // ===== Token Struct =====
@@ -84,6 +85,10 @@ typedef struct
     TokenType type;
     char *lexeme;
     size_t len;
+    int line;
+
+    // For TOKEN_ERROR
+    int code;
 } Token;
 
 // ===== Files and Buffers =====
@@ -96,11 +101,12 @@ typedef struct
     char *stream;
     char *pos;
     int line;
+    int column;
 } Scanner;
 
 // ===== Helpers =====
 char *loadInput(char *fileName);
-void reportError(int exitCode, char *message, ...);
+Token reportError(int exitCode, const char *message, ...);
 int peek(Scanner *s);
 int next_char(Scanner *s);
 
@@ -142,6 +148,7 @@ int main()
     scanner.stream = loadInput("./scanner/input.txt");
     scanner.pos = scanner.stream;
     scanner.line = 1;
+    scanner.column = 1;
 
     Token cur = next_token(&scanner);
 
@@ -173,16 +180,39 @@ int main()
 }
 
 // ===== Error Report Generation =====
-void reportError(int exitCode, char *message, ...)
+Token reportError(int exitCode, const char *message, ...)
 {
-    va_list args;
-    va_start(args, message);
+    va_list args1, args2;
+    va_start(args1, message);
+    va_copy(args2, args1);
 
-    vfprintf(stderr, message, args);
-    fprintf(stderr, "\n");
+    char buffer[512];
+    int length = vsnprintf(buffer, sizeof(buffer), message, args1);
+    va_end(args1);
 
-    va_end(args);
-    exit(exitCode);
+    // Buffer too small
+    char *interned;
+    if (length > 512)
+    {
+        char *heapBuffer = malloc(length + 1);
+        int length2 = vsnprintf(heapBuffer, length + 1, message, args2);
+        interned = insert_return_ptr_to_string(heapBuffer, length2);
+
+        free(heapBuffer);
+    }
+    else
+    {
+        interned = insert_return_ptr_to_string(buffer, length);
+    }
+
+    va_end(args2);
+
+    return (Token){
+        .type = TOKEN_ERROR,
+        .code = exitCode,
+        .len = length,
+        .lexeme = interned,
+    };
 }
 
 // ===== Input Loading to Buffer =====
@@ -194,10 +224,8 @@ char *loadInput(char *fileName)
     // Failed read operation
     if (!input)
     {
-        reportError(
-            101,
-            "MemoryError: Failed to open input file: %s",
-            fileName);
+        fprintf(stderr, "MemoryError: Failed to open input file: %s\n", fileName);
+        exit(101);
     }
 
     // Get size of file
@@ -211,9 +239,8 @@ char *loadInput(char *fileName)
     // Failed malloc
     if (!buffer)
     {
-        reportError(
-            102,
-            "MemoryErorr: Failed memory allocation for input buffer");
+        fprintf(stderr, "MemoryError: Failed memory allocation for input buffer\n");
+        exit(102);
     }
 
     // Read from the input
@@ -221,9 +248,8 @@ char *loadInput(char *fileName)
     // Failed read
     if (read != size)
     {
-        reportError(
-            103,
-            "MemoryError: Failed to read input file");
+        fprintf(stderr, "MemoryError: Failed to read input file\n");
+        exit(103);
     }
 
     // String termination
@@ -236,6 +262,7 @@ char *loadInput(char *fileName)
 // ===== Consumes a Character =====
 int next_char(Scanner *s)
 {
+    s->column++;
     return *(s->pos++);
 }
 
@@ -272,19 +299,24 @@ Token scan_number(Scanner *s)
             if (isDecimal == 1)
             {
                 char buffer[len + 1];
+                memcpy(buffer, start, len);
+                buffer[len] = '\0';
 
-                int i = 0;
-                for (; i < len; i++)
-                {
-                    buffer[i] = *(start + i);
-                }
-
-                buffer[i] = '\0';
-                reportError(
+                Token returnToken = reportError(
                     107,
                     "SyntaxError: Invalid float at line %d: '%s.' (Unexpected dot)",
                     (s->line),
                     buffer);
+                while (*s->pos != '\n')
+                {
+                    if (*s->pos == '\0')
+                    {
+                        break;
+                    }
+                    next_char(s);
+                }
+
+                return returnToken;
             }
 
             // Change float flag so no more periods
@@ -347,9 +379,10 @@ Token scan_string(Scanner *s)
     char *string = malloc(size);
 
     if (!string)
-        reportError(
-            105,
-            "MemoryError: Memory allocation failed for string literal");
+    {
+        fprintf(stderr, "MemoryError: Memory allocation failed for string literal");
+        exit(105);
+    }
 
     // Check for multiline string
     if (s->pos[0] == '\"' && s->pos[1] == '\"')
@@ -372,7 +405,7 @@ Token scan_string(Scanner *s)
             {
                 // If the file ends before string closes, because if file ends then s->pos + 1 will be invalid.
                 if (s->pos[0] == '\0' || s->pos[1] == '\0')
-                    reportError(
+                    return reportError(
                         106,
                         "SyntaxError: Line %d\nUnclosed string:\n%s (Expected \"\"\")",
                         s->line,
@@ -395,9 +428,8 @@ Token scan_string(Scanner *s)
 
                         // Failed allocation
                         if (!temp)
-                            reportError(
-                                105,
-                                "MemoryError: Memory allocation failed for string literal");
+                            fprintf(stderr, "MemoryError: Memory allocation failed for string literal");
+                        exit(105);
                         string = temp;
                     }
                     string[len++] = '"';
@@ -410,13 +442,13 @@ Token scan_string(Scanner *s)
         {
             string[len] = '\0';
             if (multiline == 1)
-                reportError(
+                return reportError(
                     106,
                     "SyntaxError: Line %d\nUnclosed string:\n%s (Expected \"\"\")",
                     s->line,
                     string);
             else
-                reportError(
+                return reportError(
                     106,
                     "SyntaxError: Line %d\nUnclosed string:\n%s (Expected \")",
                     s->line,
@@ -431,9 +463,8 @@ Token scan_string(Scanner *s)
             // Failed reallocation
             if (!temp)
             {
-                reportError(
-                    105,
-                    "MemoryError: Memory allocation failed for string literal");
+                fprintf(stderr, "MemoryError: Memory allocation failed for string literal");
+                exit(105);
             }
 
             string = temp;
@@ -463,13 +494,13 @@ Token scan_string(Scanner *s)
             case '\0':
             {
                 if (!multiline)
-                    reportError(
+                    return reportError(
                         106,
                         "SyntaxError: Line %d\nUnclosed string:\n%s (Expected \")",
                         s->line,
                         string);
                 else
-                    reportError(
+                    return reportError(
                         106,
                         "SyntaxError: Line %d\nUnclosed string:\n%s (Expected \"\"\")",
                         s->line,
@@ -477,7 +508,7 @@ Token scan_string(Scanner *s)
                 break;
             }
             default:
-                reportError(
+                return reportError(
                     104,
                     "SyntaxError: Invalid escape sequence at line %d: '\\%c'",
                     (s->line),
@@ -490,11 +521,25 @@ Token scan_string(Scanner *s)
         else if (c == '\n')
         {
             if (!multiline)
-                reportError(
+            {
+                Token returnToken = reportError(
                     108,
                     "Use of line break in single line string is not permitted. To create a multiline string, wrap the string in triple quotes (\"\"\")");
+
+                while (*s->pos != '\"')
+                {
+                    if (*s->pos == '\0')
+                        break;
+                    next_char(s);
+                }
+
+                return returnToken;
+            }
             else
+            {
                 s->line++;
+                s->column = 1;
+            }
         }
         // Increment line at new line.
 
@@ -519,7 +564,12 @@ Token next_token(Scanner *s)
     while (isspace(peek(s)))
     {
         if (peek(s) == '\n')
+        {
             s->line++;
+            s->column = 1;
+        }
+        else
+            s->column++;
         next_char(s);
     }
 
@@ -600,7 +650,10 @@ Token next_token(Scanner *s)
                         break;
                     }
                     else if (c == '\n')
+                    {
                         s->line++;
+                        s->column = 1;
+                    }
                     else if (c == '\0')
                         reportError(
                             109,
@@ -668,7 +721,7 @@ Token next_token(Scanner *s)
         case '!':
         {
             if (peek(s) != '=')
-                reportError(
+                return reportError(
                     111,
                     "SyntaxError: Unexpected chacter '!' at line %d",
                     s->line);
@@ -709,7 +762,7 @@ Token next_token(Scanner *s)
                     return (Token){.type = TILDE_SLASH, .lexeme = "~/", .len = 2};
             }
             else
-                reportError(
+                return reportError(
                     111,
                     "SyntaxError: Unexpected character '~' at line %d",
                     s->line);
@@ -735,7 +788,7 @@ Token next_token(Scanner *s)
         }
     }
 
-    reportError(
+    return reportError(
         111,
         "SyntaxError: Unexpected character '%c' at line %d",
         c,
