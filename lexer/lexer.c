@@ -99,10 +99,6 @@ typedef struct
     int code;
 } Token;
 
-// ===== Files and Buffers =====
-FILE *input;
-FILE *output;
-
 // ===== Scanner Struct =====
 typedef struct
 {
@@ -111,13 +107,15 @@ typedef struct
     char *pos;
     int line;
     int column;
+    FILE *input;
 } Scanner;
 
 // ===== Helpers =====
-char *loadInput(char *fileName);
+char *loadInput(Scanner *s, char *fileName);
 Token reportError(int exitCode, int line, const char *message, ...);
 int peek(Scanner *s);
 int next_char(Scanner *s);
+Scanner *init_scanner(char *inputFile);
 
 // ===== Main Functions =====
 Token scan_number(Scanner *s);
@@ -155,14 +153,9 @@ int main()
     // Initialize string intern pool
     init_string_pool();
     init_keywords();
-    // Create scanner
-    Scanner scanner;
-    scanner.stream = loadInput("./lexer/input.txt");
-    scanner.pos = scanner.stream;
-    scanner.line = 1;
-    scanner.column = 1;
+    Scanner *scanner = init_scanner('./lexer/input.txt');
 
-    Token cur = next_token(&scanner);
+    Token cur = next_token(scanner);
 
     // Debugging purposes
     /* if (cur.type == IDENTIFIER) {
@@ -189,6 +182,16 @@ int main()
 
     printf("\n"); */
     return 0;
+}
+
+Scanner *init_scanner(char *inputFile) {
+    Scanner *scanner = malloc(sizeof(scanner));
+    scanner->column = 1;
+    scanner->line = 1;
+    scanner->input = NULL;
+    scanner->stream = loadInput(scanner, inputFile);
+    scanner->pos = scanner->stream;
+    scanner->start = scanner->pos;
 }
 
 // ===== Error Report Generation =====
@@ -228,22 +231,22 @@ Token reportError(int exitCode, int line, const char *message, ...)
 }
 
 // ===== Input Loading to Buffer =====
-char *loadInput(char *fileName)
+char *loadInput(Scanner *s, char *fileName)
 {
     // Open file for reading bytes
-    input = fopen(fileName, "rb");
+    s->input = fopen(fileName, "rb");
 
     // Failed read operation
-    if (!input)
+    if (!s->input)
     {
         fprintf(stderr, "MemoryError: Failed to open input file: %s\n", fileName);
         exit(101);
     }
 
     // Get size of file
-    fseek(input, 0, SEEK_END);
-    long size = ftell(input);
-    rewind(input);
+    fseek(s->input, 0, SEEK_END);
+    long size = ftell(s->input);
+    rewind(s->input);
 
     // Malloc appropriate bytes
     char *buffer = malloc(size + 1);
@@ -256,7 +259,7 @@ char *loadInput(char *fileName)
     }
 
     // Read from the input
-    size_t read = fread(buffer, 1, size, input);
+    size_t read = fread(buffer, 1, size, s->input);
     // Failed read
     if (read != size)
     {
@@ -266,7 +269,7 @@ char *loadInput(char *fileName)
 
     // String termination
     buffer[size] = '\0';
-    fclose(input);
+    fclose(s->input);
 
     return buffer;
 }
