@@ -3,3 +3,4 @@ output.scanned
 .vscode/
 scannerv1
 lexer
+benchmark.c

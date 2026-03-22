@@ -153,10 +153,7 @@ int main()
     // Initialize string intern pool
     init_string_pool();
     init_keywords();
-    Scanner *scanner = init_scanner('./lexer/input.txt');
-
-    Token cur = next_token(scanner);
-
+    Scanner *scanner = init_scanner("./lexer/input.txt");
     // Debugging purposes
     /* if (cur.type == IDENTIFIER) {
         for (size_t i = 0; i < cur.object.identifierinfo.len; i++) {

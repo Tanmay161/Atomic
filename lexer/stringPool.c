@@ -46,7 +46,7 @@ void init_string_pool() {
 char *insert_return_ptr_to_string(char *string, size_t len) {
     // The table is 'full', so we reconstruct it and double the size
     // By full, I actually mean the performance will take a hit as the linked lists start getting larger
-    if ((float) string_pool->items / string_pool->capacity >= LOAD_FACTOR) {
+    if (string_pool->items >= LOAD_FACTOR * string_pool->capacity) {
         // Double the capacity, store the old capacity
         size_t old_capacity = string_pool->capacity;
         string_pool -> capacity *= 2;
