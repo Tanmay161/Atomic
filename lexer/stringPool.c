@@ -72,7 +72,7 @@ char *insert_return_ptr_to_string(char *string, size_t len) {
         string_pool->buckets = buckets;
     }
     // Get index of the bucket to jump to
-    uint32_t hash = get_hash(string, len);
+    uint32_t hash = get_hash((const unsigned char*) string, len);
     // We use bitwise AND as it is faster than modulo (%)
     size_t index = hash & (string_pool->capacity - 1);
 

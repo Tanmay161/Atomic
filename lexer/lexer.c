@@ -157,7 +157,7 @@ int main()
     init_keywords();
     // Create scanner
     Scanner scanner;
-    scanner.stream = loadInput("./scanner/input.txt");
+    scanner.stream = loadInput("./lexer/input.txt");
     scanner.pos = scanner.stream;
     scanner.line = 1;
     scanner.column = 1;
