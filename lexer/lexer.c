@@ -184,14 +184,17 @@ int main()
     return 0;
 }
 
-Scanner *init_scanner(char *inputFile) {
-    Scanner *scanner = malloc(sizeof(scanner));
+Scanner *init_scanner(char *inputFile)
+{
+    Scanner *scanner = malloc(sizeof(Scanner));
     scanner->column = 1;
     scanner->line = 1;
     scanner->input = NULL;
     scanner->stream = loadInput(scanner, inputFile);
     scanner->pos = scanner->stream;
     scanner->start = scanner->pos;
+
+    return scanner;
 }
 
 // ===== Error Report Generation =====
@@ -316,7 +319,7 @@ Token scan_number(Scanner *s)
         isDecimal = 1;
     }
 
-    while (isdigit(next) || next == '.')
+    while (isdigit(next) || (next == '.' && !scientific) || ((next == 'e' || next == 'E') && !scientific))
     {
         // Check for float
         if (next == '.')
@@ -345,17 +348,32 @@ Token scan_number(Scanner *s)
                 return returnToken;
             }
 
-            else if (!isdigit(s->pos[1]))
+            // Change float flag so no more periods
+            isDecimal = 1;
+            type = FLOAT;
+        }
+        else if (next == 'e' || next == 'E')
+        {
+            scientific = 1;
+            type = FLOAT;
+
+            next_char(s);
+
+            if (peek(s) == '-' || peek(s) == '+')
+            {
+                next_char(s);
+            }
+
+            if (!isdigit(peek(s)))
             {
                 Token returnToken = reportError(
                     107,
                     s->line,
-                    "SyntaxError: Line %d column %d\nInvalid float '%s' (Expected integer after dot)",
+                    "SyntaxError: Line %d column %d\nInvalid scientific notation (Expected digit)",
                     s->line,
-                    s->column,
-                    insert_return_ptr_to_string(start, s->pos - start));
+                    s->column);
 
-                while (*s->pos != '\n')
+                while (!isspace(*s->pos))
                 {
                     if (*s->pos == '\0')
                         break;
@@ -363,36 +381,6 @@ Token scan_number(Scanner *s)
                 }
 
                 return returnToken;
-            }
-
-            // Change float flag so no more periods
-            isDecimal = 1;
-            type = FLOAT;
-        }
-        else if (next == 'e')
-        {
-            if (!scientific)
-            {
-                scientific = 1;
-            }
-            else
-            {
-                return (Token){
-                    .len = s->pos - start,
-                    .lexeme = insert_return_ptr_to_string(start, s->pos - start),
-                    .line = s->line,
-                    .type = type};
-            }
-        }
-        else if (next == '-')
-        {
-            if (!scientific)
-            {
-                return (Token){
-                    .len = s->pos - start,
-                    .lexeme = insert_return_ptr_to_string(start, s->pos - start),
-                    .line = s->line,
-                    .type = type};
             }
         }
 
