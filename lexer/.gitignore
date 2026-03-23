@@ -1,6 +1,7 @@
-input.txt
 output.scanned
 .vscode/
 scannerv1
 lexer
+benchmark
 benchmark.c
+benchmarking_lexer.c

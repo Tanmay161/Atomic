@@ -1,3 +1,4 @@
 .vscode/
 .DS_Store
-.compiler_grade_test.lang
+compiler_grade_test.lang
+a.out

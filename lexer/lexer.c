@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <ctype.h>
 #include "stringPool.h"
+#include "lexer.h"
 
 // Macros
 #define KEYWORD_COUNT 14
@@ -22,94 +23,6 @@
     111: Unexpected character
 */
 
-typedef enum
-{
-    //  Single character tokens
-    LEFT_PAREN,
-    RIGHT_PAREN,
-    LEFT_BRACE,
-    RIGHT_BRACE,
-    COMMA,
-    DOT,
-    MINUS,
-    PLUS,
-    SEMICOLON,
-    SLASH,
-    STAR,
-    LEFT_BRACKET,
-    RIGHT_BRACKET,
-    PLUS_PLUS,
-    MINUS_MINUS,
-
-    // Multi-character tokens
-    NOT_EQUAL,
-    EQUAL,
-    EQUAL_EQUAL,
-    GREATER,
-    MOD,
-    MOD_EQUAL,
-    TILDE,
-    TILDE_SLASH,
-    TILDE_SLASH_EQUAL,
-    GREATER_EQUAL,
-    LESS,
-    LESS_EQUAL,
-    PLUS_EQUAL,
-    MINUS_EQUAL,
-    STAR_EQUAL,
-    SLASH_EQUAL,
-
-    // Literals
-    IDENTIFIER,
-    STRING,
-    INTEGER,
-    FLOAT,
-
-    // Datatypes
-    DATATYPE_INT,
-    DATATYPE_FLOAT,
-    DATATYPE_STRING,
-
-    // Keywords
-    AND,
-    OR,
-    IF,
-    ELSE,
-    FOR,
-    NIL,
-    RETURN,
-    WHILE,
-    TRUE,
-    FALSE,
-    NOT,
-
-    TOKEN_EOF,
-    TOKEN_ERROR
-} TokenType;
-
-// ===== Token Struct =====
-typedef struct
-{
-    TokenType type;
-    char *lexeme;
-    size_t len;
-    int line;
-
-    // For TOKEN_ERROR
-    int code;
-} Token;
-
-// ===== Scanner Struct =====
-typedef struct
-{
-    char *stream;
-    char *start;
-    char *pos;
-    int line;
-    int column;
-    FILE *input;
-} Scanner;
-
 // ===== Helpers =====
 char *loadInput(Scanner *s, char *fileName);
 Token reportError(int exitCode, int line, const char *message, ...);
@@ -121,12 +34,6 @@ Scanner *init_scanner(char *inputFile);
 Token scan_number(Scanner *s);
 Token scan_identifier(Scanner *s);
 Token next_token(Scanner *s);
-
-typedef struct
-{
-    char *lexeme;
-    TokenType type;
-} Keyword;
 
 Keyword keyword_list[KEYWORD_COUNT];
 
@@ -148,41 +55,10 @@ void init_keywords()
     keyword_list[13] = (Keyword){.lexeme = insert_return_ptr_to_string("str", 3), DATATYPE_STRING};
 }
 
-int main()
-{
-    // Initialize string intern pool
-    init_string_pool();
-    init_keywords();
-    Scanner *scanner = init_scanner("./lexer/input.txt");
-    // Debugging purposes
-    /* if (cur.type == IDENTIFIER) {
-        for (size_t i = 0; i < cur.object.identifierinfo.len; i++) {
-            printf("%c", cur.object.identifierinfo.start[i]);
-        }
-    }
-
-    else if (cur.type == INTEGER) {
-        for (size_t i = 0; i < cur.object.numberinfo.len; i++) {
-            printf("%c", cur.object.numberinfo.start[i]);
-        }
-    }
-
-    else if (cur.type == FLOAT) {
-        for (size_t i = 0; i < cur.object.numberinfo.len; i++) {
-            printf("%c", cur.object.numberinfo.start[i]);
-        }
-    }
-
-    else if (cur.type == STRING) {
-        printf("%s", cur.object.stringinfo.string);
-    }
-
-    printf("\n"); */
-    return 0;
-}
-
 Scanner *init_scanner(char *inputFile)
 {
+    init_string_pool();
+    init_keywords();
     Scanner *scanner = malloc(sizeof(Scanner));
     scanner->column = 1;
     scanner->line = 1;
@@ -324,7 +200,9 @@ Token scan_number(Scanner *s)
             // Invalid float
             if (isDecimal == 1)
             {
-
+                char buffer[s->pos - start + 1];
+                memcpy(buffer, start, s->pos - start);
+                buffer[s->pos - start] = '\0';
                 Token returnToken = reportError(
                     107,
                     s->line,
@@ -388,7 +266,7 @@ Token scan_number(Scanner *s)
 
     return (Token){
         .type = type,
-        .lexeme = insert_return_ptr_to_string(start, s->pos - start),
+        .lexeme = start,
         .line = s->line,
         .len = s->pos - start};
 }
@@ -659,6 +537,7 @@ Token scan_string(Scanner *s)
 Token next_token(Scanner *s)
 {
     char c;
+start:
 
     while (isspace(peek(s)))
     {
@@ -686,25 +565,25 @@ Token next_token(Scanner *s)
         switch (c)
         {
         case '(':
-            return (Token){.type = LEFT_PAREN, .lexeme = insert_return_ptr_to_string("(", 1), .len = 1, .line = s->line};
+            return (Token){.type = LEFT_PAREN, .lexeme = NULL, .line = s->line};
             break;
         case ')':
-            return (Token){.type = RIGHT_PAREN, .lexeme = insert_return_ptr_to_string(")", 1), .len = 1, .line = s->line};
+            return (Token){.type = RIGHT_PAREN, .lexeme = NULL, .line = s->line};
             break;
         case '{':
-            return (Token){.type = LEFT_BRACE, .lexeme = insert_return_ptr_to_string("{", 1), .len = 1, .line = s->line};
+            return (Token){.type = LEFT_BRACE, .lexeme = NULL, .line = s->line};
             break;
         case '}':
-            return (Token){.type = RIGHT_BRACE, .lexeme = insert_return_ptr_to_string("}", 1), .len = 1, .line = s->line};
+            return (Token){.type = RIGHT_BRACE, .lexeme = NULL, .line = s->line};
             break;
         case '[':
-            return (Token){.type = LEFT_BRACKET, .lexeme = insert_return_ptr_to_string("[", 1), .len = 1, .line = s->line};
+            return (Token){.type = LEFT_BRACKET, .lexeme = NULL, .line = s->line};
             break;
         case ']':
-            return (Token){.type = RIGHT_BRACKET, .lexeme = insert_return_ptr_to_string("]", 1), .len = 1, .line = s->line};
+            return (Token){.type = RIGHT_BRACKET, .lexeme = NULL, .line = s->line};
             break;
         case ',':
-            return (Token){.type = COMMA, .lexeme = insert_return_ptr_to_string(",", 1), .len = 1, .line = s->line};
+            return (Token){.type = COMMA, .lexeme = NULL, .line = s->line};
             break;
         // We need to check for floats like .5
         case '.':
@@ -714,7 +593,7 @@ Token next_token(Scanner *s)
                 return scan_number(s);
             }
             else
-                return (Token){.type = DOT, .lexeme = insert_return_ptr_to_string(".", 1), .len = 1, .line = s->line};
+                return (Token){.type = DOT, .lexeme = NULL, .line = s->line};
             break;
         }
 
@@ -726,7 +605,7 @@ Token next_token(Scanner *s)
                 while (peek(s) != '\n' && peek(s) != '\0')
                     next_char(s);
 
-                return next_token(s);
+                goto start;
             }
             else if (peek(s) == '*')
             {
@@ -751,15 +630,15 @@ Token next_token(Scanner *s)
                             s->column);
                 }
 
-                return next_token(s);
+                goto start;
             }
             else if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = SLASH_EQUAL, .lexeme = insert_return_ptr_to_string("/=", 2), .len = 2, .line = s->line};
+                return (Token){.type = SLASH_EQUAL, .lexeme = NULL, .line = s->line};
             }
             else
-                return (Token){.type = SLASH, .lexeme = insert_return_ptr_to_string("/", 1), .len = 1, .line = s->line};
+                return (Token){.type = SLASH, .lexeme = NULL, .line = s->line};
             break;
         }
         case '+':
@@ -767,15 +646,15 @@ Token next_token(Scanner *s)
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = PLUS_EQUAL, .lexeme = insert_return_ptr_to_string("+=", 2), .len = 2, .line = s->line};
+                return (Token){.type = PLUS_EQUAL, .lexeme = NULL, .line = s->line};
             }
             else if (peek(s) == '+')
             {
                 next_char(s);
-                return (Token){.type = PLUS_PLUS, .lexeme = insert_return_ptr_to_string("++", 2), .len = 2, .line = s->line};
+                return (Token){.type = PLUS_PLUS, .lexeme = NULL, .line = s->line};
             }
             else
-                return (Token){.type = PLUS, .lexeme = insert_return_ptr_to_string("+", 1), .len = 1, .line = s->line};
+                return (Token){.type = PLUS, .lexeme = NULL, .line = s->line};
             break;
         }
         case '-':
@@ -783,15 +662,15 @@ Token next_token(Scanner *s)
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = MINUS_EQUAL, .lexeme = insert_return_ptr_to_string("-=", 2), .len = 2, .line = s->line};
+                return (Token){.type = MINUS_EQUAL, .lexeme = NULL, .line = s->line};
             }
             else if (peek(s) == '-')
             {
                 next_char(s);
-                return (Token){.type = MINUS_MINUS, .lexeme = insert_return_ptr_to_string("--", 2), .len = 2, .line = s->line};
+                return (Token){.type = MINUS_MINUS, .lexeme = NULL, .line = s->line};
             }
             else
-                return (Token){.type = MINUS, .lexeme = insert_return_ptr_to_string("-", 1), .len = 1, .line = s->line};
+                return (Token){.type = MINUS, .lexeme = NULL, .line = s->line};
             break;
         }
         case '*':
@@ -799,14 +678,14 @@ Token next_token(Scanner *s)
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = STAR_EQUAL, .lexeme = insert_return_ptr_to_string("*=", 2), .len = 2, .line = s->line};
+                return (Token){.type = STAR_EQUAL, .lexeme = NULL, .line = s->line};
             }
             else
-                return (Token){.type = STAR, .lexeme = insert_return_ptr_to_string("*", 1), .len = 1, .line = s->line};
+                return (Token){.type = STAR, .lexeme = NULL, .line = s->line};
             break;
         }
         case ';':
-            return (Token){.type = SEMICOLON, .lexeme = insert_return_ptr_to_string(";", 1), .len = 1, .line = s->line};
+            return (Token){.type = SEMICOLON, .lexeme = NULL, .line = s->line};
             break;
         case '!':
         {
@@ -818,27 +697,27 @@ Token next_token(Scanner *s)
                     s->line,
                     s->column);
             else
-                return (Token){.type = NOT_EQUAL, .lexeme = insert_return_ptr_to_string("!=", 2), .len = 2, .line = s->line};
+                return (Token){.type = NOT_EQUAL, .lexeme = NULL, .line = s->line};
         }
         case '=':
         {
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = EQUAL_EQUAL, .lexeme = insert_return_ptr_to_string("==", 2), .len = 2, .line = s->line};
+                return (Token){.type = EQUAL_EQUAL, .lexeme = NULL, .line = s->line};
             }
             else
-                return (Token){.type = EQUAL, .lexeme = insert_return_ptr_to_string("=", 1), .len = 1, .line = s->line};
+                return (Token){.type = EQUAL, .lexeme = NULL, .line = s->line};
         }
         case '%':
         {
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = MOD_EQUAL, .lexeme = insert_return_ptr_to_string("%=", 2), .len = 2, .line = s->line};
+                return (Token){.type = MOD_EQUAL, .lexeme = NULL, .line = s->line};
             }
             else
-                return (Token){.type = MOD, .lexeme = insert_return_ptr_to_string("%", 1), .len = 1, .line = s->line};
+                return (Token){.type = MOD, .lexeme = NULL, .line = s->line};
         }
         case '~':
         {
@@ -848,10 +727,10 @@ Token next_token(Scanner *s)
                 if (peek(s) == '=')
                 {
                     next_char(s);
-                    return (Token){.type = TILDE_SLASH_EQUAL, .lexeme = insert_return_ptr_to_string("~/=", 3), .len = 3, .line = s->line};
+                    return (Token){.type = TILDE_SLASH_EQUAL, .lexeme = NULL, .line = s->line};
                 }
                 else
-                    return (Token){.type = TILDE_SLASH, .lexeme = insert_return_ptr_to_string("~/", 2), .len = 2, .line = s->line};
+                    return (Token){.type = TILDE_SLASH, .lexeme = NULL, .line = s->line};
             }
             else
                 return reportError(
@@ -866,18 +745,18 @@ Token next_token(Scanner *s)
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = GREATER_EQUAL, .lexeme = insert_return_ptr_to_string(">=", 2), .len = 2, .line = s->line};
+                return (Token){.type = GREATER_EQUAL, .lexeme = NULL, .line = s->line};
             }
-            return (Token){.type = GREATER, .lexeme = insert_return_ptr_to_string(">", 1), .len = 1, .line = s->line};
+            return (Token){.type = GREATER, .lexeme = NULL, .line = s->line};
         }
         case '<':
         {
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = LESS_EQUAL, .lexeme = insert_return_ptr_to_string("<=", 2), .len = 2, .line = s->line};
+                return (Token){.type = LESS_EQUAL, .lexeme = NULL, .line = s->line};
             }
-            return (Token){.type = LESS, .lexeme = insert_return_ptr_to_string("<", 1), .len = 1, .line = s->line};
+            return (Token){.type = LESS, .lexeme = NULL, .line = s->line};
         }
         }
     }
