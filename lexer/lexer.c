@@ -6,9 +6,6 @@
 #include "stringPool.h"
 #include "lexer.h"
 
-// Macros
-#define KEYWORD_COUNT 14
-
 /* ===== Error Codes =====
     101: Failed to open input file
     102: Cannot memory allocation for input buffer
@@ -35,30 +32,9 @@ Token scan_number(Scanner *s);
 Token scan_identifier(Scanner *s);
 Token next_token(Scanner *s);
 
-Keyword keyword_list[KEYWORD_COUNT];
-
-void init_keywords()
-{
-    keyword_list[0] = (Keyword){.lexeme = insert_return_ptr_to_string("if", 2), IF};
-    keyword_list[1] = (Keyword){.lexeme = insert_return_ptr_to_string("while", 5), WHILE};
-    keyword_list[2] = (Keyword){.lexeme = insert_return_ptr_to_string("and", 3), AND};
-    keyword_list[3] = (Keyword){.lexeme = insert_return_ptr_to_string("or", 2), OR};
-    keyword_list[4] = (Keyword){.lexeme = insert_return_ptr_to_string("else", 4), ELSE};
-    keyword_list[5] = (Keyword){.lexeme = insert_return_ptr_to_string("false", 5), FALSE};
-    keyword_list[6] = (Keyword){.lexeme = insert_return_ptr_to_string("for", 3), FOR};
-    keyword_list[7] = (Keyword){.lexeme = insert_return_ptr_to_string("nil", 3), NIL};
-    keyword_list[8] = (Keyword){.lexeme = insert_return_ptr_to_string("return", 6), RETURN};
-    keyword_list[9] = (Keyword){.lexeme = insert_return_ptr_to_string("true", 4), TRUE};
-    keyword_list[10] = (Keyword){.lexeme = insert_return_ptr_to_string("not", 3), NOT};
-    keyword_list[11] = (Keyword){.lexeme = insert_return_ptr_to_string("int", 3), DATATYPE_INT};
-    keyword_list[12] = (Keyword){.lexeme = insert_return_ptr_to_string("float", 5), DATATYPE_FLOAT};
-    keyword_list[13] = (Keyword){.lexeme = insert_return_ptr_to_string("str", 3), DATATYPE_STRING};
-}
-
 Scanner *init_scanner(char *inputFile)
 {
     init_string_pool();
-    init_keywords();
     Scanner *scanner = malloc(sizeof(Scanner));
     scanner->column = 1;
     scanner->line = 1;
@@ -286,20 +262,60 @@ Token scan_identifier(Scanner *s)
     }
 
     // Keyword check
-    char *interned = insert_return_ptr_to_string(start, s->pos - start);
-    for (size_t i = 0; i < KEYWORD_COUNT; i++)
-    {
-        if (interned == keyword_list[i].lexeme)
-        {
-            return (Token){.type = keyword_list[i].type, .lexeme = interned, .len = s->pos - start, .line = s->line};
+    size_t len = (size_t) (s->pos - start);
+    switch (start[0]) {
+        case 'i': {
+            if (len == 2 && (memcmp(start, "if", 2) == 0)) return (Token){.type = IF};
+            else if (len == 3 && (memcmp(start, "int", 3) == 0)) return (Token){.type = DATATYPE_INT};
+            break;
+        }
+        case 'w': {
+            if (len == 5 && (memcmp(start, "while", 5) == 0)) return (Token){.type = WHILE};
+            break;
+        }
+        case 'a': {
+            if (len == 3 && (memcmp(start, "and", 3) == 0)) return (Token){.type = AND};
+            break;
+        }
+        case 'o': {
+            if (len == 2 && (memcmp(start, "or", 2) == 0)) return (Token){.type = OR};
+            break;
+        }
+        case 'e': {
+            if (len == 4 && (memcmp(start, "else", 4) == 0)) return (Token){.type = ELSE};
+            break;
+        }
+        case 'f': {
+            if (len == 5 && (memcmp(start, "false", 5) == 0)) return (Token){.type = FALSE};
+            else if (len == 3 && (memcmp(start, "for", 3) == 0)) return (Token){.type = FOR};
+            else if (len == 5 && (memcmp(start, "float", 5) == 0)) return (Token){.type = DATATYPE_FLOAT};
+            break;
+        }
+        case 'n': {
+            if (len == 3 && (memcmp(start, "nil", 3) == 0)) return (Token){.type = NIL};
+            else if (len == 3 && (memcmp(start, "not", 3) == 0)) return (Token){.type = NOT};
+            break;
+        }
+        case 'r': {
+            if (len == 6 && (memcmp(start, "return", 6) == 0)) return (Token){.type = RETURN};
+            break;
+        }
+        case 't': {
+            if (len == 4 && (memcmp(start, "true", 4) == 0)) return (Token){.type = TRUE};
+            break;
+        }
+        case 's': {
+            if (len == 3 && (memcmp(start, "str", 3) == 0)) return (Token){.type = DATATYPE_STRING};
+            break;
         }
     }
 
     return (Token){
         .type = IDENTIFIER,
-        .lexeme = interned,
+        .lexeme = insert_return_ptr_to_string(start, len),
         .line = s->line,
-        .len = s->pos - start};
+        .len = len
+    };
 }
 
 // ===== String Handling =====
