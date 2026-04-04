@@ -59,7 +59,7 @@ Token reportError(int exitCode, int line, const char *message, ...)
 
     // Buffer too small
     char *interned;
-    if (length > 512)
+    if (length >= 512)
     {
         char *heapBuffer = malloc(length + 1);
         int length2 = vsnprintf(heapBuffer, length + 1, message, args2);
