@@ -18,6 +18,7 @@
     109: Unclosed multiline comment
     110: Memory allocation failed for string intern pool
     111: Unexpected character
+    112: Memory allocation failed for scanner
 */
 
 // ===== Helpers =====
@@ -36,6 +37,12 @@ Scanner *init_scanner(char *inputFile)
 {
     init_string_pool();
     Scanner *scanner = malloc(sizeof(Scanner));
+
+    if (!scanner) {
+        fprintf(stderr, "MemoryError: Failed to allocate scanner\n");
+        exit(112);
+    }
+
     scanner->column = 1;
     scanner->line = 1;
     scanner->input = NULL;
@@ -129,7 +136,8 @@ char *loadInput(Scanner *s, char *fileName)
 // ===== Consumes a Character =====
 int next_char(Scanner *s)
 {
-    char c = *(s->pos++);
+    char c = *(s->pos);
+    s->pos++;
 
     if (c == '\n')
     {
@@ -176,9 +184,6 @@ Token scan_number(Scanner *s)
             // Invalid float
             if (isDecimal == 1)
             {
-                char buffer[s->pos - start + 1];
-                memcpy(buffer, start, s->pos - start);
-                buffer[s->pos - start] = '\0';
                 Token returnToken = reportError(
                     107,
                     s->line,
