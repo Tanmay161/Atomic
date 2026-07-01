@@ -98,7 +98,7 @@ char *loadInput(Scanner *s, char *fileName)
     // Failed read operation
     if (!s->input)
     {
-        fprintf(stderr, "MemoryError: Failed to open input file: %s\n", fileName);
+        fprintf(stderr, "FileError: Failed to open input file: %s\n", fileName);
         exit(101);
     }
 
@@ -718,6 +718,7 @@ start:
                     s->line,
                     s->column);
             else
+                next_char(s);
                 return (Token){.type = NOT_EQUAL, .lexeme = NULL, .line = s->line};
         }
         case '=':
@@ -739,27 +740,6 @@ start:
             }
             else
                 return (Token){.type = MOD, .lexeme = NULL, .line = s->line};
-        }
-        case '~':
-        {
-            if (peek(s) == '/')
-            {
-                next_char(s);
-                if (peek(s) == '=')
-                {
-                    next_char(s);
-                    return (Token){.type = TILDE_SLASH_EQUAL, .lexeme = NULL, .line = s->line};
-                }
-                else
-                    return (Token){.type = TILDE_SLASH, .lexeme = NULL, .line = s->line};
-            }
-            else
-                return reportError(
-                    111,
-                    s->line,
-                    "SyntaxError: Line %d column %d\nUnexpected character '~'",
-                    s->line,
-                    s->column);
         }
         case '>':
         {
@@ -789,4 +769,13 @@ start:
         s->line,
         s->column,
         c);
+}
+
+// == Peek token (for parsing) ==
+Token peek_token(Scanner *s) {
+    Scanner saved = *s;
+    Token next = next_token(s);
+
+    *s = saved;
+    return next;
 }

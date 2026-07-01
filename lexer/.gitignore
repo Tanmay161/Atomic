@@ -4,3 +4,5 @@ scannerv1
 benchmark
 benchmark.c
 benchmarking_lexer.c
+peek_testing.c
+peek_test
