@@ -23,7 +23,7 @@
 
 // ===== Helpers =====
 char *loadInput(Scanner *s, char *fileName);
-Token reportError(int exitCode, int line, const char *message, ...);
+Token reportError(int exitCode, int line, int column, const char *message, ...);
 int peek(Scanner *s);
 int next_char(Scanner *s);
 Scanner *init_scanner(char *inputFile);
@@ -38,7 +38,8 @@ Scanner *init_scanner(char *inputFile)
     init_string_pool();
     Scanner *scanner = malloc(sizeof(Scanner));
 
-    if (!scanner) {
+    if (!scanner)
+    {
         fprintf(stderr, "MemoryError: Failed to allocate scanner\n");
         exit(112);
     }
@@ -54,7 +55,7 @@ Scanner *init_scanner(char *inputFile)
 }
 
 // ===== Error Report Generation =====
-Token reportError(int exitCode, int line, const char *message, ...)
+Token reportError(int exitCode, int line, int column, const char *message, ...)
 {
     va_list args1, args2;
     va_start(args1, message);
@@ -86,7 +87,8 @@ Token reportError(int exitCode, int line, const char *message, ...)
         .code = exitCode,
         .len = length,
         .lexeme = interned,
-        .line = line};
+        .line = line,
+        .column = column};
 }
 
 // ===== Input Loading to Buffer =====
@@ -163,6 +165,7 @@ Token scan_number(Scanner *s)
 {
     // Starting position
     char *start = s->start;
+    int start_col = s->column-1;
 
     int isDecimal = 0;
     int scientific = 0;
@@ -187,9 +190,10 @@ Token scan_number(Scanner *s)
                 Token returnToken = reportError(
                     107,
                     s->line,
+                    start_col,
                     "SyntaxError: Line %d column %d\nInvalid float: '%s' (Unexpected dot)",
                     s->line,
-                    s->column,
+                    start_col,
                     insert_return_ptr_to_string(start, s->pos - start));
 
                 while (*s->pos != '\n')
@@ -225,9 +229,10 @@ Token scan_number(Scanner *s)
                 Token returnToken = reportError(
                     107,
                     s->line,
+                    start_col,
                     "SyntaxError: Line %d column %d\nInvalid scientific notation (Expected digit)",
                     s->line,
-                    s->column);
+                    start_col);
 
                 while (!isspace(*s->pos))
                 {
@@ -249,6 +254,7 @@ Token scan_number(Scanner *s)
         .type = type,
         .lexeme = start,
         .line = s->line,
+        .column = start_col,
         .len = s->pos - start};
 }
 
@@ -257,6 +263,7 @@ Token scan_identifier(Scanner *s)
 {
     // Get start pointer
     char *start = s->start;
+    int start_col = s->column-1;
     int next = peek(s);
 
     // Run while token remains an identifier
@@ -267,60 +274,85 @@ Token scan_identifier(Scanner *s)
     }
 
     // Keyword check
-    size_t len = (size_t) (s->pos - start);
-    switch (start[0]) {
-        case 'i': {
-            if (len == 2 && (memcmp(start, "if", 2) == 0)) return (Token){.type = IF};
-            else if (len == 3 && (memcmp(start, "int", 3) == 0)) return (Token){.type = DATATYPE_INT};
-            break;
-        }
-        case 'w': {
-            if (len == 5 && (memcmp(start, "while", 5) == 0)) return (Token){.type = WHILE};
-            break;
-        }
-        case 'a': {
-            if (len == 3 && (memcmp(start, "and", 3) == 0)) return (Token){.type = AND};
-            break;
-        }
-        case 'o': {
-            if (len == 2 && (memcmp(start, "or", 2) == 0)) return (Token){.type = OR};
-            break;
-        }
-        case 'e': {
-            if (len == 4 && (memcmp(start, "else", 4) == 0)) return (Token){.type = ELSE};
-            break;
-        }
-        case 'f': {
-            if (len == 5 && (memcmp(start, "false", 5) == 0)) return (Token){.type = FALSE};
-            else if (len == 3 && (memcmp(start, "for", 3) == 0)) return (Token){.type = FOR};
-            else if (len == 5 && (memcmp(start, "float", 5) == 0)) return (Token){.type = DATATYPE_FLOAT};
-            break;
-        }
-        case 'n': {
-            if (len == 3 && (memcmp(start, "nil", 3) == 0)) return (Token){.type = NIL};
-            else if (len == 3 && (memcmp(start, "not", 3) == 0)) return (Token){.type = NOT};
-            break;
-        }
-        case 'r': {
-            if (len == 6 && (memcmp(start, "return", 6) == 0)) return (Token){.type = RETURN};
-            break;
-        }
-        case 't': {
-            if (len == 4 && (memcmp(start, "true", 4) == 0)) return (Token){.type = TRUE};
-            break;
-        }
-        case 's': {
-            if (len == 3 && (memcmp(start, "str", 3) == 0)) return (Token){.type = DATATYPE_STRING};
-            break;
-        }
+    size_t len = (size_t)(s->pos - start);
+    switch (start[0])
+    {
+    case 'i':
+    {
+        if (len == 2 && (memcmp(start, "if", 2) == 0))
+            return (Token){.type = IF, .len = 2, .column = start_col, .lexeme = "if", .line = s->line};
+        else if (len == 3 && (memcmp(start, "int", 3) == 0))
+            return (Token){.type = DATATYPE_INT, .len = 3, .column = start_col, .lexeme = "int", .line = s->line};
+        break;
+    }
+    case 'w':
+    {
+        if (len == 5 && (memcmp(start, "while", 5) == 0))
+            return (Token){.type = WHILE, .len = 5, .column = start_col, .lexeme = "while", .line = s->line};
+        break;
+    }
+    case 'a':
+    {
+        if (len == 3 && (memcmp(start, "and", 3) == 0))
+            return (Token){.type = AND, .len = 3, .column = start_col, .lexeme = "and", .line = s->line};
+        break;
+    }
+    case 'o':
+    {
+        if (len == 2 && (memcmp(start, "or", 2) == 0))
+            return (Token){.type = OR, .len = 2, .column = start_col, .lexeme = "or", .line = s->line};
+        break;
+    }
+    case 'e':
+    {
+        if (len == 4 && (memcmp(start, "else", 4) == 0))
+            return (Token){.type = ELSE, .len = 4, .column = start_col, .lexeme = "else", .line = s->line};
+        break;
+    }
+    case 'f':
+    {
+        if (len == 5 && (memcmp(start, "false", 5) == 0))
+            return (Token){.type = FALSE, .len = 5, .column = start_col, .lexeme = "false", .line = s->line};
+        else if (len == 3 && (memcmp(start, "for", 3) == 0))
+            return (Token){.type = FOR, .len = 3, .column = start_col, .lexeme = "for", .line = s->line};
+        else if (len == 5 && (memcmp(start, "float", 5) == 0))
+            return (Token){.type = DATATYPE_FLOAT, .len = 5, .column = start_col, .lexeme = "float", .line = s->line};
+        break;
+    }
+    case 'n':
+    {
+        if (len == 3 && (memcmp(start, "nil", 3) == 0))
+            return (Token){.type = NIL, .len = 3, .column = start_col, .lexeme = "nil", .line = s->line};
+        else if (len == 3 && (memcmp(start, "not", 3) == 0))
+            return (Token){.type = NOT, .len = 3, .column = start_col, .lexeme = "not", .line = s->line};
+        break;
+    }
+    case 'r':
+    {
+        if (len == 6 && (memcmp(start, "return", 6) == 0))
+            return (Token){.type = RETURN, .len = 6, .column = start_col, .lexeme = "return", .line = s->line};
+        break;
+    }
+    case 't':
+    {
+        if (len == 4 && (memcmp(start, "true", 4) == 0))
+            return (Token){.type = TRUE, .len = 4, .column = start_col, .lexeme = "true", .line = s->line};
+        break;
+    }
+    case 's':
+    {
+        if (len == 3 && (memcmp(start, "str", 3) == 0))
+            return (Token){.type = DATATYPE_STRING, .len = 3, .column = start_col, .lexeme = "str", .line = s->line};
+        break;
+    }
     }
 
     return (Token){
         .type = IDENTIFIER,
         .lexeme = insert_return_ptr_to_string(start, len),
         .line = s->line,
-        .len = len
-    };
+        .column = start_col,
+        .len = len};
 }
 
 // ===== String Handling =====
@@ -328,6 +360,8 @@ Token scan_string(Scanner *s)
 {
     // We don't go back to the previously consumed character as that is a quote.
     int multiline = 0;
+    int start_line = s->line;
+    int start_col = s->column-1;
 
     size_t size = 32;
     size_t len = 0;
@@ -364,10 +398,11 @@ Token scan_string(Scanner *s)
                 {
                     Token returnError = reportError(
                         106,
-                        s->line,
+                        start_line,
+                        start_col,
                         "SyntaxError: Line %d column %d\nUnclosed string:\n%s (Expected \"\"\")",
-                        s->line,
-                        s->column,
+                        start_line,
+                        start_col,
                         insert_return_ptr_to_string(string, len));
 
                     free(string);
@@ -411,9 +446,10 @@ Token scan_string(Scanner *s)
             {
                 Token returnError = reportError(
                     106,
-                    s->line,
+                    start_line,
+                    s->column,
                     "SyntaxError: Line %d column %d\nUnclosed string:\n%s (Expected \"\"\")",
-                    s->line,
+                    start_line,
                     s->column,
                     insert_return_ptr_to_string(string, len));
 
@@ -425,9 +461,10 @@ Token scan_string(Scanner *s)
                 Token returnError = reportError(
                     106,
                     s->line,
+                    start_col,
                     "SyntaxError: Line %d column %d\nUnclosed string:\n%s (Expected \")",
                     s->line,
-                    s->column,
+                    start_col,
                     insert_return_ptr_to_string(string, len));
 
                 free(string);
@@ -478,9 +515,10 @@ Token scan_string(Scanner *s)
                     Token returnError = reportError(
                         106,
                         s->line,
+                        start_col,
                         "SyntaxError: Line %d column %d\nUnclosed string:\n%s (Expected \")",
                         s->line,
-                        s->column,
+                        start_col,
                         insert_return_ptr_to_string(string, len));
 
                     free(string);
@@ -491,9 +529,10 @@ Token scan_string(Scanner *s)
                     Token returnError = reportError(
                         106,
                         s->line,
+                        start_col,
                         "SyntaxError: Line %d column %d\nUnclosed string:\n%s (Expected \"\"\")",
                         s->line,
-                        s->column,
+                        start_col,
                         insert_return_ptr_to_string(string, len));
 
                     free(string);
@@ -507,9 +546,10 @@ Token scan_string(Scanner *s)
                 return reportError(
                     104,
                     s->line,
+                    start_col,
                     "SyntaxError: Line %d column %d\nInvalid escape sequence: '\\%c'",
                     s->line,
-                    s->column,
+                    start_col,
                     next);
             }
             }
@@ -524,9 +564,10 @@ Token scan_string(Scanner *s)
                 Token returnToken = reportError(
                     108,
                     s->line,
+                    start_col,
                     "SyntaxError: Line %d column %d\nUse of line break in single line string is not permitted. To create a multiline string, wrap the string in triple quotes (\"\"\")",
                     s->line,
-                    s->column);
+                    start_col);
 
                 while (*s->pos != '\"')
                 {
@@ -551,6 +592,7 @@ Token scan_string(Scanner *s)
         .type = STRING,
         .lexeme = interned,
         .line = s->line,
+        .column = start_col,
         .len = len};
 }
 
@@ -569,7 +611,7 @@ start:
     c = next_char(s);
 
     if (c == '\0')
-        return (Token){.type = TOKEN_EOF};
+        return (Token){.type = TOKEN_EOF, .column = s->column-1, .lexeme = "<EOF>", .len = 5, .line = s->line};
 
     // Identifier handling
     else if (isalpha(c) || c == '_')
@@ -583,28 +625,29 @@ start:
     // Comment / operator handling
     else
     {
+        int start_column = s->column-1;
         switch (c)
         {
         case '(':
-            return (Token){.type = LEFT_PAREN, .lexeme = NULL, .line = s->line};
+            return (Token){.type = LEFT_PAREN, .line = s->line, .column = start_column, .lexeme = "(", .len = 1};
             break;
         case ')':
-            return (Token){.type = RIGHT_PAREN, .lexeme = NULL, .line = s->line};
+            return (Token){.type = RIGHT_PAREN, .line = s->line, .column = start_column, .lexeme = ")", .len = 1};
             break;
         case '{':
-            return (Token){.type = LEFT_BRACE, .lexeme = NULL, .line = s->line};
+            return (Token){.type = LEFT_BRACE, .line = s->line, .column = start_column, .lexeme = "{", .len = 1};
             break;
         case '}':
-            return (Token){.type = RIGHT_BRACE, .lexeme = NULL, .line = s->line};
+            return (Token){.type = RIGHT_BRACE, .line = s->line, .column = start_column, .lexeme = "}", .len = 1};
             break;
         case '[':
-            return (Token){.type = LEFT_BRACKET, .lexeme = NULL, .line = s->line};
+            return (Token){.type = LEFT_BRACKET, .line = s->line, .column = start_column, .lexeme = "[", .len = 1};
             break;
         case ']':
-            return (Token){.type = RIGHT_BRACKET, .lexeme = NULL, .line = s->line};
+            return (Token){.type = RIGHT_BRACKET, .line = s->line, .column = start_column, .lexeme = "]", .len = 1};
             break;
         case ',':
-            return (Token){.type = COMMA, .lexeme = NULL, .line = s->line};
+            return (Token){.type = COMMA, .line = s->line, .column = start_column, .lexeme = ",", .len = 1};
             break;
         // We need to check for floats like .5
         case '.':
@@ -614,7 +657,7 @@ start:
                 return scan_number(s);
             }
             else
-                return (Token){.type = DOT, .lexeme = NULL, .line = s->line};
+                return (Token){.type = DOT, .line = s->line, .column = start_column, .lexeme = ".", .len = 1};
             break;
         }
 
@@ -646,9 +689,10 @@ start:
                         return reportError(
                             109,
                             start_line,
+                            start_column,
                             "SyntaxError: Line %d column %d\nUnclosed multiline comment",
                             start_line,
-                            s->column);
+                            start_column);
                 }
 
                 goto start;
@@ -656,10 +700,10 @@ start:
             else if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = SLASH_EQUAL, .lexeme = NULL, .line = s->line};
+                return (Token){.type = SLASH_EQUAL, .line = s->line, .column = start_column, .lexeme = "/=", .len = 2};
             }
             else
-                return (Token){.type = SLASH, .lexeme = NULL, .line = s->line};
+                return (Token){.type = SLASH, .line = s->line, .column = start_column, .lexeme = "/", .len = 1};
             break;
         }
         case '+':
@@ -667,15 +711,15 @@ start:
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = PLUS_EQUAL, .lexeme = NULL, .line = s->line};
+                return (Token){.type = PLUS_EQUAL, .line = s->line, .column = start_column, .lexeme = "+=", .len = 2};
             }
             else if (peek(s) == '+')
             {
                 next_char(s);
-                return (Token){.type = PLUS_PLUS, .lexeme = NULL, .line = s->line};
+                return (Token){.type = PLUS_PLUS, .line = s->line, .column = start_column, .lexeme = "++", .len = 2};
             }
             else
-                return (Token){.type = PLUS, .lexeme = NULL, .line = s->line};
+                return (Token){.type = PLUS, .line = s->line, .column = start_column, .lexeme = "+", .len = 1};
             break;
         }
         case '-':
@@ -683,15 +727,15 @@ start:
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = MINUS_EQUAL, .lexeme = NULL, .line = s->line};
+                return (Token){.type = MINUS_EQUAL, .line = s->line, .column = start_column, .lexeme = "-=", .len = 2};
             }
             else if (peek(s) == '-')
             {
                 next_char(s);
-                return (Token){.type = MINUS_MINUS, .lexeme = NULL, .line = s->line};
+                return (Token){.type = MINUS_MINUS, .line = s->line, .column = start_column, .lexeme = "--", .len = 2};
             }
             else
-                return (Token){.type = MINUS, .lexeme = NULL, .line = s->line};
+                return (Token){.type = MINUS, .line = s->line, .column = start_column, .lexeme = "-", .len = 1};
             break;
         }
         case '*':
@@ -699,14 +743,14 @@ start:
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = STAR_EQUAL, .lexeme = NULL, .line = s->line};
+                return (Token){.type = STAR_EQUAL, .line = s->line, .column = start_column, .lexeme = "*=", .len = 2};
             }
             else
-                return (Token){.type = STAR, .lexeme = NULL, .line = s->line};
+                return (Token){.type = STAR, .line = s->line, .column = start_column, .lexeme = "*", .len = 1};
             break;
         }
         case ';':
-            return (Token){.type = SEMICOLON, .lexeme = NULL, .line = s->line};
+            return (Token){.type = SEMICOLON, .line = s->line, .column = start_column, .lexeme = ";", .len = 1};
             break;
         case '!':
         {
@@ -714,50 +758,51 @@ start:
                 return reportError(
                     111,
                     s->line,
+                    start_column,
                     "SyntaxError: Line %d column %d\nUnexpected character '!'",
                     s->line,
-                    s->column);
+                    start_column);
             else
                 next_char(s);
-                return (Token){.type = NOT_EQUAL, .lexeme = NULL, .line = s->line};
+            return (Token){.type = NOT_EQUAL, .line = s->line, .column = start_column, .lexeme = "!=", .len = 2};
         }
         case '=':
         {
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = EQUAL_EQUAL, .lexeme = NULL, .line = s->line};
+                return (Token){.type = EQUAL_EQUAL, .line = s->line, .column = start_column, .lexeme = "==", .len = 2};
             }
             else
-                return (Token){.type = EQUAL, .lexeme = NULL, .line = s->line};
+                return (Token){.type = EQUAL, .line = s->line, .column = start_column, .lexeme = "=", .len = 1};
         }
         case '%':
         {
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = MOD_EQUAL, .lexeme = NULL, .line = s->line};
+                return (Token){.type = MOD_EQUAL, .line = s->line, .column = start_column, .lexeme = "%=", .len = 2};
             }
             else
-                return (Token){.type = MOD, .lexeme = NULL, .line = s->line};
+                return (Token){.type = MOD, .line = s->line, .column = start_column, .lexeme = "%", .len = 1};
         }
         case '>':
         {
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = GREATER_EQUAL, .lexeme = NULL, .line = s->line};
+                return (Token){.type = GREATER_EQUAL, .line = s->line, .column = start_column, .lexeme = ">=", .len = 2};
             }
-            return (Token){.type = GREATER, .lexeme = NULL, .line = s->line};
+            return (Token){.type = GREATER, .line = s->line, .column = start_column, .lexeme = ">", .len = 1};
         }
         case '<':
         {
             if (peek(s) == '=')
             {
                 next_char(s);
-                return (Token){.type = LESS_EQUAL, .lexeme = NULL, .line = s->line};
+                return (Token){.type = LESS_EQUAL, .line = s->line, .column = start_column, .lexeme = "<=", .len = 2};
             }
-            return (Token){.type = LESS, .lexeme = NULL, .line = s->line};
+            return (Token){.type = LESS, .line = s->line, .column = start_column, .lexeme = "<", .len = 1};
         }
         }
     }
@@ -765,14 +810,16 @@ start:
     return reportError(
         111,
         s->line,
+        s->column-1,
         "SyntaxError: Line %d column %d\nUnexpected character '%c'",
         s->line,
-        s->column,
+        s->column-1,
         c);
 }
 
 // == Peek token (for parsing) ==
-Token peek_token(Scanner *s) {
+Token peek_token(Scanner *s)
+{
     Scanner saved = *s;
     Token next = next_token(s);
 

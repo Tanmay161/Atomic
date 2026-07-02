@@ -85,6 +85,7 @@ typedef struct
     char *lexeme;
     size_t len;
     int line;
+    int column;
 
     // For TOKEN_ERROR
     int code;

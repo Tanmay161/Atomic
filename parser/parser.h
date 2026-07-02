@@ -22,6 +22,8 @@ typedef enum {
     TYPE_NIL,
 } LiteralType;
 
+char* mapping[] = {"BINARY", "UNARY", "POSTFIX", "GROUPING","LITERAL",};
+
 // Expression struct
 typedef struct Expression {
     EvalType type;
@@ -66,6 +68,13 @@ typedef struct Expression {
                 size_t len;
             } Value;
         } Literal;
+
+        struct {
+            char *lexeme;
+            size_t len;
+            int line;
+            int column;
+        } Error;
     } ;
 } Expression;
 
