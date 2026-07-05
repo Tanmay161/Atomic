@@ -7,6 +7,7 @@
 #include "lexer.h"
 
 /* ===== Error Codes =====
+    100: Failed allocation for scanner
     101: Failed to open input file
     102: Cannot memory allocation for input buffer
     103: Failed to read input file
@@ -18,7 +19,6 @@
     109: Unclosed multiline comment
     110: Memory allocation failed for string intern pool
     111: Unexpected character
-    112: Memory allocation failed for scanner
 */
 
 // ===== Helpers =====
@@ -41,7 +41,7 @@ Scanner *init_scanner(char *inputFile)
     if (!scanner)
     {
         fprintf(stderr, "MemoryError: Failed to allocate scanner\n");
-        exit(112);
+        exit(100);
     }
 
     scanner->column = 1;
