@@ -11,6 +11,7 @@ typedef struct Statement Statement;
 // Statement types
 typedef enum {
     TYPE_EXPR,
+    TYPE_VARDECL,
 } StatementType;
 
 // Eval type
@@ -20,6 +21,8 @@ typedef enum {
     POSTFIX,
     GROUPING,
     LITERAL,
+    VARIABLE,
+    ASSIGNMENT,
 } EvalType;
 
 // Literal types
@@ -56,6 +59,15 @@ typedef struct {
     Expression *expr;
 } ExprStmt;
 
+// Variable declarations
+typedef struct {
+    char *name;
+    int len;
+
+    TokenType type;
+    Expression *initializer;
+} VarDecl;
+
 // Statement struct
 typedef struct Statement {
     SourceSpan span;
@@ -63,6 +75,7 @@ typedef struct Statement {
 
     union {
         ExprStmt *exprStmt;
+        VarDecl *varDecl;
     };
 } Statement;
 
@@ -118,6 +131,15 @@ typedef struct Expression {
             int line;
             int column;
         } Error;
+
+        struct {
+            Token identifier;
+        } Variable;
+
+        struct {
+            Token identifier;
+            Expression *value;
+        } Assignment;
     } ;
 } Expression;
 

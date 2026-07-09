@@ -58,6 +58,7 @@ typedef enum
     DATATYPE_INT,
     DATATYPE_FLOAT,
     DATATYPE_STRING,
+    DATATYPE_BOOL,
 
     // Keywords
     AND,

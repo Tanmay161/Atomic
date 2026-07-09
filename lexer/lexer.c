@@ -165,7 +165,7 @@ Token scan_number(Scanner *s)
 {
     // Starting position
     char *start = s->start;
-    int start_col = s->column-1;
+    int start_col = s->column - 1;
 
     int isDecimal = 0;
     int scientific = 0;
@@ -263,7 +263,7 @@ Token scan_identifier(Scanner *s)
 {
     // Get start pointer
     char *start = s->start;
-    int start_col = s->column-1;
+    int start_col = s->column - 1;
     int next = peek(s);
 
     // Run while token remains an identifier
@@ -345,6 +345,12 @@ Token scan_identifier(Scanner *s)
             return (Token){.type = DATATYPE_STRING, .len = 3, .column = start_col, .lexeme = "str", .line = s->line};
         break;
     }
+    case 'b':
+    {
+        if (len == 4 && (memcmp(start, "bool", 4) == 0))
+            return (Token){.type = DATATYPE_BOOL, .len = 4, .column = start_col, .lexeme = "bool", .line = s->line};
+        break;
+    }
     }
 
     return (Token){
@@ -361,7 +367,7 @@ Token scan_string(Scanner *s)
     // We don't go back to the previously consumed character as that is a quote.
     int multiline = 0;
     int start_line = s->line;
-    int start_col = s->column-1;
+    int start_col = s->column - 1;
 
     size_t size = 32;
     size_t len = 0;
@@ -611,7 +617,7 @@ start:
     c = next_char(s);
 
     if (c == '\0')
-        return (Token){.type = TOKEN_EOF, .column = s->column-1, .lexeme = "<EOF>", .len = 5, .line = s->line};
+        return (Token){.type = TOKEN_EOF, .column = s->column - 1, .lexeme = "<EOF>", .len = 5, .line = s->line};
 
     // Identifier handling
     else if (isalpha(c) || c == '_')
@@ -625,7 +631,7 @@ start:
     // Comment / operator handling
     else
     {
-        int start_column = s->column-1;
+        int start_column = s->column - 1;
         switch (c)
         {
         case '(':
@@ -810,10 +816,10 @@ start:
     return reportError(
         111,
         s->line,
-        s->column-1,
+        s->column - 1,
         "SyntaxError: Line %d column %d\nUnexpected character '%c'",
         s->line,
-        s->column-1,
+        s->column - 1,
         c);
 }
 

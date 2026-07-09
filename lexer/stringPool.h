@@ -2,6 +2,7 @@
 
 #define STRINGPOOL_H
 #include <stdlib.h>
+#include <stdint.h>
 
 typedef struct Node {
     char *string;

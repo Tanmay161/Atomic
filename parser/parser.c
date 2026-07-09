@@ -2,10 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stddef.h>
 
 #include "parser.h"
 #include "lexer.h"
 #include "ast.h"
+#include "environment.h"
+#include "hashmap.h"
 
 /* ===== Error Codes =====
     200: Unable to allocate memory for parser
@@ -26,13 +29,15 @@ Expression *unary(Parser *p);
 Expression *postfix(Parser *p);
 Expression *primary(Parser *p);
 Statement *statement(Parser *p);
+Statement *declaration(Parser *p);
 Program *parse(Parser *p);
 
 // === Helpers ===
 Expression *construct_binary(Expression *left, Token operator, Expression *right, int startline, int endline, int startcol, int endcol);
 Expression *construct_unary(Token operator, Expression *right, int startline, int endline, int startcol, int endcol);
 Expression *construct_postfix(Token operator, Expression *left, int startline, int endline, int startcol, int endcol);
-Statement *construct_statement(Expression *expr, Token semicolon);
+Statement *construct_statement(Expression *expr, Token semicolon, StatementType type, ...);
+Statement *variable_declaration(Parser *p);
 
 // === Experimenting with panic recovery ===
 void synchronize(Parser *p);
@@ -233,16 +238,38 @@ Expression *construct_postfix(Token operator, Expression *left, int startline, i
     return expression;
 }
 
-Statement *construct_statement(Expression *expr, Token semicolon) {
+Expression *construct_assignment(Token identifier, Expression *value) {
+    Expression *expression = malloc(sizeof(Expression));
+    if (!expression)
+    {
+        fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
+        exit(201);
+    }
+
+    expression->type = ASSIGNMENT;
+    expression->Assignment.identifier = identifier;
+    expression->Assignment.value = value;
+
+    expression->span.startline = identifier.line;
+    expression->span.startcol = identifier.column;
+    expression->span.endline = value->span.endline;
+    expression->span.endcol = value->span.endcol;
+
+    return expression;
+}
+
+Statement *construct_statement(Expression *expr, Token semicolon, StatementType type, ...) {
+    va_list args;
+    va_start(args, type);
+
     Statement *stmt = malloc(sizeof(Statement));
 
     if (!stmt) {
         fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
         exit(201);
     }
-    
-    stmt->exprStmt->expr = expr;
-    stmt->type = TYPE_EXPR;
+
+    stmt->type = type;
 
     stmt->span.startline = expr->span.startline;
     stmt->span.startcol = expr->span.startcol;
@@ -250,7 +277,44 @@ Statement *construct_statement(Expression *expr, Token semicolon) {
     stmt->span.endline = semicolon.line;
     stmt->span.endcol = semicolon.column;
 
+    switch(type) {
+        case TYPE_EXPR: {
+            stmt->exprStmt->expr = expr;
+            break;
+        }
+        case TYPE_VARDECL: {
+            Token identifier = va_arg(args, Token);
+            TokenType type = va_arg(args, TokenType);
+
+            stmt->varDecl->name = identifier.lexeme;
+            stmt->varDecl->len = identifier.len;
+            stmt->varDecl->type = type;
+            stmt->varDecl->initializer = expr;
+        }
+    }
+
     return stmt;
+}
+
+Statement *variable_declaration(Parser *p) {
+    TokenType type = next_token(p->scanner).type;
+    Token identifier = next_token(p->scanner);
+
+    if (identifier.type != IDENTIFIER)
+        error_report(202, "ParsingError: Line %d column %d\nExpected identifier, got '%.*s'", identifier.line, identifier.column, identifier.len, identifier.lexeme);
+    
+    Expression *initializer = NULL;
+
+    if (peek_token(p->scanner).type == EQUAL) {
+        next_token(p->scanner);
+        initializer = expression(p);
+    }
+
+    Token next = next_token(p->scanner);
+    if (next.type != SEMICOLON)
+        error_report(202, "ParsingError: Line %d column %d\nExpected ';', got '%.*s'", next.line, next.column, next.len, next.lexeme);
+    
+    return construct_statement(initializer, next, TYPE_VARDECL, identifier, type);
 }
 
 Program *parse(Parser *p) {
@@ -284,7 +348,7 @@ Program *parse(Parser *p) {
             statements = temp;
         } 
 
-        Statement *fetched = statement(p);
+        Statement *fetched = declaration(p);
         statements[stmtCount++] = fetched;
     }
 
@@ -294,21 +358,46 @@ Program *parse(Parser *p) {
     return program;
 }
 
+Statement *declaration(Parser *p) {
+    Token next = peek_token(p->scanner);
+    if (next.type == DATATYPE_FLOAT || next.type == DATATYPE_INT || next.type == DATATYPE_STRING || next.type == DATATYPE_BOOL)
+        return variable_declaration(p);
+    
+    return statement(p);
+}
+
 Statement *statement(Parser *p) {
     Expression *expr = expression(p);
     Token next = peek_token(p->scanner);
 
     if (next.type == SEMICOLON) {
         next_token(p->scanner);
-        return construct_statement(expr, next);
+        return construct_statement(expr, next, TYPE_EXPR);
     } else {
-        fprintf(stderr, "ParsingError: Line %d column %d\nExpected ';', got %.*s\n", next.line, next.column, next.len, next.lexeme);
+        fprintf(stderr, "ParsingError: Line %d column %d\nExpected ';', got '%.*s'", next.line, next.column, next.len, next.lexeme);
         exit(202);
     }
 }
 
 Expression *expression(Parser *p)
 {
+    return assignment(p);
+}
+
+Expression *assignment(Parser *p) {
+    if (peek_token(p->scanner).type == IDENTIFIER) {
+        Token identifier = next_token(p->scanner);
+
+        if (peek_token(p->scanner).type == EQUAL) {
+            next_token(p);
+            Expression *expr = assignment(p);
+
+            return construct_assignment(identifier, expr);
+        }
+
+        return equality(p);
+    }
+
     return equality(p);
 }
 
@@ -474,7 +563,7 @@ Expression *primary(Parser *p)
 
         if (!expr) {
             fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(202);
+            exit(201);
         }
 
         expr->type = LITERAL;
@@ -494,7 +583,7 @@ Expression *primary(Parser *p)
 
         if (!expr) {
             fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(202);
+            exit(201);
         }
 
         expr->type = LITERAL;
@@ -514,7 +603,7 @@ Expression *primary(Parser *p)
 
         if (!expr) {
             fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(202);
+            exit(201);
         }
 
         expr->type = LITERAL;
@@ -534,7 +623,7 @@ Expression *primary(Parser *p)
 
         if (!expr) {
             fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(202);
+            exit(201);
         }
 
         expr->type = LITERAL;
@@ -563,7 +652,7 @@ Expression *primary(Parser *p)
 
         if (!expr) {
             fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(202);
+            exit(201);
         }
 
         expr->type = LITERAL;
@@ -593,7 +682,7 @@ Expression *primary(Parser *p)
 
         if (!expr) {
             fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(202);
+            exit(201);
         }
 
         expr->type = LITERAL;
@@ -607,6 +696,19 @@ Expression *primary(Parser *p)
 
         expr->span.endline = next.line;
         expr->span.endcol = next.column + next.len + 1;
+
+        return expr;
+    }
+    else if (next.type == IDENTIFIER) {
+        Expression *expr = malloc(sizeof(Expression));
+
+        if (!expr) {
+            fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
+            exit(201);
+        }
+
+        expr->type = VARIABLE;
+        expr->Variable.identifier = next;
 
         return expr;
     }

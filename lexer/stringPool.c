@@ -97,6 +97,12 @@ char *insert_return_ptr_to_string(char *string, size_t len) {
 
     newNode->next = NULL;
     newNode->string = malloc(len + 1);
+
+    if (!newNode->string) {
+        fprintf(stderr, "MemoryError: Failed to allocate memory for identifier\n");
+        exit(110);
+    }
+
     memcpy(newNode->string, string, len);
     newNode->string[len] = '\0';
     newNode->len = len;
