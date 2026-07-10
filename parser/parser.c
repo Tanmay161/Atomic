@@ -271,25 +271,66 @@ Statement *construct_statement(Expression *expr, Token semicolon, StatementType 
 
     stmt->type = type;
 
-    stmt->span.startline = expr->span.startline;
-    stmt->span.startcol = expr->span.startcol;
-
-    stmt->span.endline = semicolon.line;
-    stmt->span.endcol = semicolon.column;
-
     switch(type) {
         case TYPE_EXPR: {
+            ExprStmt *expr_stmt = malloc(sizeof(ExprStmt));
+            if (!expr_stmt) 
+                error_report(202, "MemoryError: Unable to allocate memory for AST node.");
+            
+            stmt->exprStmt = expr_stmt;
             stmt->exprStmt->expr = expr;
+
+            stmt->span.startline = expr->span.startline;
+            stmt->span.startcol = expr->span.startcol;
+
+            stmt->span.endline = semicolon.line;
+            stmt->span.endcol = semicolon.column;
+
             break;
         }
         case TYPE_VARDECL: {
+            ExprStmt *var_decl = malloc(sizeof(VarDecl));
+            if (!var_decl) 
+                error_report(202, "MemoryError: Unable to allocate memory for AST node.");
+
             Token identifier = va_arg(args, Token);
             TokenType type = va_arg(args, TokenType);
 
+            stmt->varDecl = var_decl;
             stmt->varDecl->name = identifier.lexeme;
             stmt->varDecl->len = identifier.len;
             stmt->varDecl->type = type;
             stmt->varDecl->initializer = expr;
+
+            stmt->span.startline = expr->span.startline;
+            stmt->span.startcol = expr->span.startcol;
+
+            stmt->span.endline = semicolon.line;
+            stmt->span.endcol = semicolon.column;
+
+            break;
+        }
+        case TYPE_BLOCK:
+        {
+            ExprStmt *block = malloc(sizeof(Block));
+            if (!block) 
+                error_report(202, "MemoryError: Unable to allocate memory for AST node.");
+
+            Token left_paren = va_arg(args, Token);
+            Statement **statements = va_arg(args, Statement**);
+            size_t count = va_arg(args, size_t);
+
+            stmt->block = block;
+            stmt->block->statements = statements;
+            stmt->block->count = count;
+
+            stmt->span.startline = left_paren.line;
+            stmt->span.startcol = left_paren.column;
+
+            stmt->span.endline = semicolon.line;
+            stmt->span.endcol = semicolon.column;
+
+            break;
         }
     }
 
@@ -315,6 +356,42 @@ Statement *variable_declaration(Parser *p) {
         error_report(202, "ParsingError: Line %d column %d\nExpected ';', got '%.*s'", next.line, next.column, next.len, next.lexeme);
     
     return construct_statement(initializer, next, TYPE_VARDECL, identifier, type);
+}
+
+Statement *construct_block(Parser *p) {
+    Token left_paren = next_token(p->scanner);
+    
+    size_t capacity = 4;
+    Statement **statements = calloc(capacity, sizeof(Statement*));
+    
+    if (!statements) 
+        error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+    
+    size_t count = 0;
+    Token next = peek_token(p->scanner);
+
+    while (next.type != RIGHT_BRACE && next.type != TOKEN_EOF) {
+        if (count == capacity) {
+            capacity *= 2;
+            Statement **temp = realloc(statements, capacity * sizeof(Statement*));
+
+            if (!temp) 
+                error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+            
+            statements = temp;
+        }
+
+        statements[count++] = declaration(p);
+        next = peek_token(p->scanner);
+    }
+
+    if (next.type != RIGHT_BRACE) 
+        error_report(202, "ParsingError: Line %d column %d\nExpected '}', got '%.*s'", next.line, next.column, next.len, next.lexeme);
+    
+    Statement *block = construct_statement(NULL, next, TYPE_BLOCK, left_paren, statements, count);
+    next_token(p->scanner);
+    
+    return block;
 }
 
 Program *parse(Parser *p) {
@@ -367,15 +444,19 @@ Statement *declaration(Parser *p) {
 }
 
 Statement *statement(Parser *p) {
-    Expression *expr = expression(p);
     Token next = peek_token(p->scanner);
 
-    if (next.type == SEMICOLON) {
-        next_token(p->scanner);
-        return construct_statement(expr, next, TYPE_EXPR);
-    } else {
-        fprintf(stderr, "ParsingError: Line %d column %d\nExpected ';', got '%.*s'", next.line, next.column, next.len, next.lexeme);
-        exit(202);
+    if (next.type == LEFT_BRACE) return construct_block(p);
+    else 
+    {
+        Expression *expr = expression(p);
+        next = peek_token(p->scanner);
+
+        if (next.type == SEMICOLON) {
+            next_token(p->scanner);
+            return construct_statement(expr, next, TYPE_EXPR);
+        } else 
+            error_report(202, "ParsingError: Line %d column %d\nExpected ';', got '%.*s'", next.line, next.column, next.len, next.lexeme);
     }
 }
 
@@ -385,20 +466,21 @@ Expression *expression(Parser *p)
 }
 
 Expression *assignment(Parser *p) {
-    if (peek_token(p->scanner).type == IDENTIFIER) {
-        Token identifier = next_token(p->scanner);
+    Expression *expr = equality(p);
+    
+    if (peek_token(p->scanner).type == EQUAL) {
+        next_token(p->scanner);
+        Expression *value = assignment(p);
 
-        if (peek_token(p->scanner).type == EQUAL) {
-            next_token(p);
-            Expression *expr = assignment(p);
-
-            return construct_assignment(identifier, expr);
+        if (expr->type == VARIABLE) {
+            Token identifier = expr->Variable.identifier;
+            return construct_assignment(identifier, value);
         }
 
-        return equality(p);
+        error_report(202, "SyntaxError: Line %d column %d\nInvalid assignment target", expr->span.startline, expr->span.startcol);
     }
 
-    return equality(p);
+    return expr;
 }
 
 Expression *equality(Parser *p)

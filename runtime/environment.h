@@ -4,6 +4,7 @@
 #include "hashmap.h"
 
 typedef struct {
+    Environment *enclosing;
     Hashmap variables;
 } Environment;
 

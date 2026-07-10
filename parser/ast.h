@@ -12,6 +12,7 @@ typedef struct Statement Statement;
 typedef enum {
     TYPE_EXPR,
     TYPE_VARDECL,
+    TYPE_BLOCK,
 } StatementType;
 
 // Eval type
@@ -68,6 +69,12 @@ typedef struct {
     Expression *initializer;
 } VarDecl;
 
+// Blocks
+typedef struct {
+    Statement **statements;
+    size_t count;
+} Block;
+
 // Statement struct
 typedef struct Statement {
     SourceSpan span;
@@ -76,6 +83,7 @@ typedef struct Statement {
     union {
         ExprStmt *exprStmt;
         VarDecl *varDecl;
+        Block *block;
     };
 } Statement;
 
