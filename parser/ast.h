@@ -13,6 +13,8 @@ typedef enum {
     TYPE_EXPR,
     TYPE_VARDECL,
     TYPE_BLOCK,
+    TYPE_IF,
+    TYPE_WHILE,
 } StatementType;
 
 // Eval type
@@ -24,6 +26,7 @@ typedef enum {
     LITERAL,
     VARIABLE,
     ASSIGNMENT,
+    LOGICAL,
 } EvalType;
 
 // Literal types
@@ -75,6 +78,19 @@ typedef struct {
     size_t count;
 } Block;
 
+// If statements
+typedef struct {
+    Expression *condition;
+    Statement *thenBranch;
+    Statement *elseBranch;
+} IfStmt;
+
+// While statements
+typedef struct {
+    Expression *condition;
+    Statement *body;
+} WhileStmt;
+
 // Statement struct
 typedef struct Statement {
     SourceSpan span;
@@ -84,6 +100,8 @@ typedef struct Statement {
         ExprStmt *exprStmt;
         VarDecl *varDecl;
         Block *block;
+        IfStmt *ifStmt;
+        WhileStmt *whileStmt;
     };
 } Statement;
 
@@ -133,6 +151,7 @@ typedef struct Expression {
             } Value;
         } Literal;
 
+        // Errors
         struct {
             char *lexeme;
             size_t len;
@@ -140,14 +159,25 @@ typedef struct Expression {
             int column;
         } Error;
 
+        // Variable struct containing the identifier
         struct {
             Token identifier;
         } Variable;
 
+        // Assignment struct
+        // Ex: x = 5
         struct {
             Token identifier;
             Expression *value;
         } Assignment;
+
+        // Logical struct
+        // Ex: x and y, x or (y and z)
+        struct {
+            Expression *Left;
+            Token Operator;
+            Expression *Right;
+        } Logical;
     } ;
 } Expression;
 
