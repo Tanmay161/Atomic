@@ -37,9 +37,6 @@ typedef enum
     GREATER,
     MOD,
     MOD_EQUAL,
-    TILDE,
-    TILDE_SLASH,
-    TILDE_SLASH_EQUAL,
     GREATER_EQUAL,
     LESS,
     LESS_EQUAL,
@@ -47,18 +44,21 @@ typedef enum
     MINUS_EQUAL,
     STAR_EQUAL,
     SLASH_EQUAL,
+    ARROW,
 
     // Literals
     IDENTIFIER,
     STRING,
     INTEGER,
     FLOAT,
+    FUNC,
 
     // Datatypes
     DATATYPE_INT,
     DATATYPE_FLOAT,
     DATATYPE_STRING,
     DATATYPE_BOOL,
+    DATATYPE_VOID,
 
     // Keywords
     AND,

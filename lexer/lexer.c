@@ -317,6 +317,8 @@ Token scan_identifier(Scanner *s)
             return (Token){.type = FOR, .len = 3, .column = start_col, .lexeme = "for", .line = s->line};
         else if (len == 5 && (memcmp(start, "float", 5) == 0))
             return (Token){.type = DATATYPE_FLOAT, .len = 5, .column = start_col, .lexeme = "float", .line = s->line};
+        else if (len == 4 && (memcmp(start, "func", 4) == 0))
+            return (Token){.type = FUNC, .len = 4, .column = start_col, .lexeme = "func", .line = s->line};
         break;
     }
     case 'n':
@@ -349,6 +351,12 @@ Token scan_identifier(Scanner *s)
     {
         if (len == 4 && (memcmp(start, "bool", 4) == 0))
             return (Token){.type = DATATYPE_BOOL, .len = 4, .column = start_col, .lexeme = "bool", .line = s->line};
+        break;
+    }
+    case 'v':
+    {
+        if (len == 4 && (memcmp(start, "void", 4) == 0))
+            return (Token){.type = DATATYPE_VOID, .len = 4, .column = start_col, .lexeme = "void", .line = s->line};
         break;
     }
     }
@@ -739,6 +747,11 @@ start:
             {
                 next_char(s);
                 return (Token){.type = MINUS_MINUS, .line = s->line, .column = start_column, .lexeme = "--", .len = 2};
+            }
+            else if (peek(s) == '>')
+            {
+                next_char(s);
+                return (Token){.type = ARROW, .line = s->line, .column = start_column, .lexeme = "->", .len = 2};
             }
             else
                 return (Token){.type = MINUS, .line = s->line, .column = start_column, .lexeme = "-", .len = 1};

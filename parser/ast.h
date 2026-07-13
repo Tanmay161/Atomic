@@ -12,6 +12,7 @@ typedef struct Statement Statement;
 typedef enum {
     TYPE_EXPR,
     TYPE_VARDECL,
+    TYPE_FUNCDECL,
     TYPE_BLOCK,
     TYPE_IF,
     TYPE_WHILE,
@@ -27,6 +28,7 @@ typedef enum {
     VARIABLE,
     ASSIGNMENT,
     LOGICAL,
+    CALL,
 } EvalType;
 
 // Literal types
@@ -50,6 +52,18 @@ typedef struct {
     int endcol;
 } SourceSpan;
 
+// Parameter (for functions)
+typedef struct {
+    TokenType datatype;
+    Token identifier;
+} Parameter;
+
+// Blocks
+typedef struct {
+    Statement **statements;
+    size_t count;
+} Block;
+
 // Program struct
 typedef struct {
     Statement **statements;
@@ -72,11 +86,15 @@ typedef struct {
     Expression *initializer;
 } VarDecl;
 
-// Blocks
+// Function declarations
 typedef struct {
-    Statement **statements;
-    size_t count;
-} Block;
+    Token identifier;
+    TokenType returnType;
+    Parameter **parameters;
+    int paramCount;
+
+    Block *body;
+} FuncDecl;
 
 // If statements
 typedef struct {
@@ -99,6 +117,7 @@ typedef struct Statement {
     union {
         ExprStmt *exprStmt;
         VarDecl *varDecl;
+        FuncDecl *funcDecl;
         Block *block;
         IfStmt *ifStmt;
         WhileStmt *whileStmt;
@@ -169,6 +188,7 @@ typedef struct Expression {
         struct {
             Token identifier;
             Expression *value;
+            Token operator;
         } Assignment;
 
         // Logical struct
@@ -178,6 +198,12 @@ typedef struct Expression {
             Token Operator;
             Expression *Right;
         } Logical;
+
+        struct {
+            Expression *callee;
+            Expression **arguments;
+            int argCount;
+        } Call;
     } ;
 } Expression;
 

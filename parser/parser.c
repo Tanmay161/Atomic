@@ -36,13 +36,23 @@ Program *parse(Parser *p);
 // === Helpers ===
 Expression *construct_binary(Expression *left, Token operator, Expression *right);
 Expression *construct_logical(Expression *left, Token operator, Expression *right);
-Expression *construct_unary(Token operator, Expression *right, int startline, int endline, int startcol, int endcol);
-Expression *construct_postfix(Token operator, Expression *left, int startline, int endline, int startcol, int endcol);
+Expression *construct_unary(Token operator, Expression *right);
+Expression *construct_postfix(Token operator, Expression *left);
+Expression *construct_assignment(Token identifier, Expression *value, Token operator);
+Expression *construct_call(Expression *callee, Expression **args, int argcount, Token right_paren);
+Expression *finishCall(Parser *p, Expression *callee);
 Statement *construct_statement(Expression *expr, Token semicolon, StatementType type, ...);
 Statement *variable_declaration(Parser *p);
+Statement *function_declaration(Parser *p);
 Statement *construct_block(Parser *p);
+Statement *expression_statement(Parser *p);
 Statement *if_statement(Parser *p);
 Statement *while_statement(Parser *p);
+Statement *for_statement(Parser *p);
+
+Token consume(Parser *p, TokenType type, const char *message, int errorCode);
+int check(Parser *p, TokenType type);
+int match(Parser *p, TokenType type);
 
 // === Experimenting with panic recovery ===
 void synchronize(Parser *p);
@@ -54,6 +64,7 @@ void output_block(Block *block);
 
 // Error reporting
 void error_report(int exitCode, const char *message, ...);
+// void verror_report(int exitCode, const char *message, va_list args);
 
 int main()
 {
@@ -85,11 +96,32 @@ void output_statement(Statement *statement)
         printf("Variable declaration\n");
         printf("Identifier: '%.*s'\n", statement->varDecl->len, statement->varDecl->name);
 
-        if (statement->varDecl->initializer != NULL) {
+        if (statement->varDecl->initializer != NULL)
+        {
             printf("Initializer: ");
             output_expression(statement->varDecl->initializer);
             printf("\n");
         }
+        break;
+    }
+    case TYPE_FUNCDECL:
+    {
+        printf("Function declaration\n");
+        printf("Identifier: %.*s\n", statement->funcDecl->identifier.len, statement->funcDecl->identifier.lexeme);
+        printf("Parameter count: %d\n", statement->funcDecl->paramCount);
+
+        if (statement->funcDecl->parameters != NULL)
+        {
+            printf("Parameters: \n");
+            for (int i = 0; i < statement->funcDecl->paramCount; i++)
+            {
+                printf("%.*s\n", statement->funcDecl->parameters[i]->identifier.len, statement->funcDecl->parameters[i]->identifier.lexeme);
+            }
+        }
+
+        printf("Body: ");
+        output_block(statement->funcDecl->body);
+
         break;
     }
     case TYPE_BLOCK:
@@ -107,10 +139,22 @@ void output_statement(Statement *statement)
         output_block(statement->ifStmt->thenBranch->block);
         printf("\n");
 
-        if (statement->ifStmt->elseBranch != NULL) {
+        if (statement->ifStmt->elseBranch != NULL)
+        {
             printf("Else branch: ");
             output_statement(statement->ifStmt->elseBranch);
         }
+        break;
+    }
+    case TYPE_WHILE:
+    {
+        printf("While statement\n");
+        printf("Condition: ");
+        output_expression(statement->whileStmt->condition);
+        printf("\n");
+        printf("Body: ");
+        output_block(statement->whileStmt->body->block);
+        printf("\n");
         break;
     }
     }
@@ -224,7 +268,55 @@ void output_expression(Expression *expr)
         printf(")");
         break;
     }
+    case CALL:
+    {
+        printf("Call\n");
+        printf("Callee: ");
+        output_expression(expr->Call.callee);
+        if (expr->Call.argCount != 0)
+        {
+            printf("\nArguments: ");
+
+            for (int i = 0; i < expr->Call.argCount; i++)
+            {
+                output_expression(expr->Call.arguments[i]);
+                printf(",");
+            }
+        }
+        printf("\nArgument Count: ");
+        printf("%d\n", expr->Call.argCount);
+
+        break;
     }
+    }
+}
+
+int check(Parser *p, TokenType type)
+{
+    return peek_token(p->scanner).type == type;
+}
+
+int match(Parser *p, TokenType type)
+{
+    int result = check(p, type);
+
+    if (result)
+    {
+        next_token(p->scanner);
+    }
+
+    return result;
+}
+
+Token consume(Parser *p, TokenType type, const char *message, int errorCode)
+{
+    if (!check(p, type))
+    {
+        Token offending = peek_token(p->scanner);
+        error_report(errorCode, message, offending.line, offending.column, offending.len, offending.lexeme);
+    }
+
+    return next_token(p->scanner);
 }
 
 Parser *init_parser(char *file_name)
@@ -266,6 +358,7 @@ void synchronize(Parser *p)
         case DATATYPE_FLOAT:
         case DATATYPE_INT:
         case DATATYPE_STRING:
+        case DATATYPE_VOID:
         case RETURN:
             return;
         default:
@@ -289,7 +382,15 @@ void error_report(int exitCode, const char *message, ...)
     exit(exitCode);
 }
 
-Expression *construct_binary(Expression *left, Token operator, Expression *right) {
+/* void verror_report(int exitCode, const char *message, va_list args) {
+    vfprintf(stderr, message, args);
+    fprintf(stderr, "\n");
+
+    exit(exitCode);
+} */
+
+Expression *construct_binary(Expression *left, Token operator, Expression *right)
+{
     Expression *expression = malloc(sizeof(Expression));
     if (!expression)
     {
@@ -332,7 +433,7 @@ Expression *construct_logical(Expression *left, Token operator, Expression *righ
     return expression;
 }
 
-Expression *construct_unary(Token operator, Expression *right, int startline, int endline, int startcol, int endcol)
+Expression *construct_unary(Token operator, Expression *right)
 {
     Expression *expression = malloc(sizeof(Expression));
     if (!expression)
@@ -345,15 +446,15 @@ Expression *construct_unary(Token operator, Expression *right, int startline, in
     expression->Unary.Operator = operator;
     expression->Unary.Expr = right;
 
-    expression->span.startline = startline;
-    expression->span.startcol = startcol;
-    expression->span.endline = endline;
-    expression->span.endcol = endcol;
+    expression->span.startline = operator.line;
+    expression->span.startcol = operator.column;
+    expression->span.endline = right->span.endline;
+    expression->span.endcol = right->span.endcol;
 
     return expression;
 }
 
-Expression *construct_postfix(Token operator, Expression *left, int startline, int endline, int startcol, int endcol)
+Expression *construct_postfix(Token operator, Expression *left)
 {
     Expression *expression = malloc(sizeof(Expression));
     if (!expression)
@@ -366,15 +467,15 @@ Expression *construct_postfix(Token operator, Expression *left, int startline, i
     expression->Postfix.Expr = left;
     expression->Postfix.Operator = operator;
 
-    expression->span.startline = startline;
-    expression->span.startcol = startcol;
-    expression->span.endline = endline;
-    expression->span.endcol = endcol;
+    expression->span.startline = left->span.startline;
+    expression->span.startcol = left->span.startcol;
+    expression->span.endline = operator.line;
+    expression->span.endcol = operator.column;
 
     return expression;
 }
 
-Expression *construct_assignment(Token identifier, Expression *value)
+Expression *construct_assignment(Token identifier, Expression *value, Token operator)
 {
     Expression *expression = malloc(sizeof(Expression));
     if (!expression)
@@ -386,6 +487,7 @@ Expression *construct_assignment(Token identifier, Expression *value)
     expression->type = ASSIGNMENT;
     expression->Assignment.identifier = identifier;
     expression->Assignment.value = value;
+    expression->Assignment.operator = operator;
 
     expression->span.startline = identifier.line;
     expression->span.startcol = identifier.column;
@@ -393,6 +495,62 @@ Expression *construct_assignment(Token identifier, Expression *value)
     expression->span.endcol = value->span.endcol;
 
     return expression;
+}
+
+Expression *construct_call(Expression *callee, Expression **args, int argCount, Token right_paren)
+{
+    Expression *expression = malloc(sizeof(Expression));
+    if (!expression)
+    {
+        fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
+        exit(201);
+    }
+
+    expression->type = CALL;
+    expression->Call.callee = callee;
+    expression->Call.arguments = args;
+    expression->Call.argCount = argCount;
+
+    expression->span.startline = callee->span.startline;
+    expression->span.startcol = callee->span.startcol;
+
+    expression->span.endline = right_paren.line;
+    expression->span.endcol = right_paren.column;
+
+    return expression;
+}
+
+Expression *finishCall(Parser *p, Expression *callee)
+{
+    Expression **args = NULL;
+    int count = 0;
+
+    if (!check(p, RIGHT_PAREN))
+    {
+        size_t capacity = 4;
+
+        args = calloc(capacity, sizeof(Expression *));
+
+        do
+        {
+            if (count > 255)
+                error_report(202, "SyntaxError: line %d column %d\nCalls may not pass more than 255 arguments.", args[255]->span.startline, args[255]->span.startcol);
+            if (count == capacity)
+            {
+                capacity *= 2;
+                Expression **temp = realloc(args, capacity * sizeof(Expression *));
+
+                if (!temp)
+                    error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+                args = temp;
+            }
+            args[count++] = expression(p);
+        } while (match(p, COMMA));
+    }
+
+    Token right_paren = consume(p, RIGHT_PAREN, "SyntaxError: Line %d column %d\nExpected ')' after function arguments, got '%.*s'\n\nMaybe you forgot a comma?", 202);
+    return construct_call(callee, args, count, right_paren);
 }
 
 Statement *construct_statement(Expression *expr, Token semicolon, StatementType type, ...)
@@ -452,6 +610,7 @@ Statement *construct_statement(Expression *expr, Token semicolon, StatementType 
 
         break;
     }
+    case TYPE_FUNCDECL:
     case TYPE_BLOCK:
     {
         Block *block = malloc(sizeof(Block));
@@ -506,8 +665,8 @@ Statement *construct_statement(Expression *expr, Token semicolon, StatementType 
         WhileStmt *while_stmt = malloc(sizeof(WhileStmt));
         if (!while_stmt)
             error_report(202, "MemoryError: Unable to allocate memory for AST node.");
-        
-        Statement *body = va_arg(args, Statement*);
+
+        Statement *body = va_arg(args, Statement *);
         stmt->whileStmt = while_stmt;
         stmt->whileStmt->body = body;
         stmt->whileStmt->condition = expr;
@@ -528,24 +687,119 @@ Statement *construct_statement(Expression *expr, Token semicolon, StatementType 
 Statement *variable_declaration(Parser *p)
 {
     TokenType type = next_token(p->scanner).type;
-    Token identifier = next_token(p->scanner);
 
-    if (identifier.type != IDENTIFIER)
-        error_report(202, "ParsingError: Line %d column %d\nExpected identifier, got '%.*s'", identifier.line, identifier.column, identifier.len, identifier.lexeme);
-
+    Token identifier = consume(p, IDENTIFIER, "SyntaxError: Line %d column %d\nExpected identifier, got '%.*s'", 202);
     Expression *initializer = NULL;
 
-    if (peek_token(p->scanner).type == EQUAL)
+    if (check(p, EQUAL))
     {
         next_token(p->scanner);
         initializer = expression(p);
     }
 
-    Token next = next_token(p->scanner);
-    if (next.type != SEMICOLON)
-        error_report(202, "ParsingError: Line %d column %d\nExpected ';', got '%.*s'", next.line, next.column, next.len, next.lexeme);
-
+    Token next = consume(p, SEMICOLON, "SyntaxError: Line %d column %d\nExpected ';' after declaration, got '%.*s'\n\nMaybe you forgot a semicolon?", 202);
     return construct_statement(initializer, next, TYPE_VARDECL, identifier, type);
+}
+
+Statement *function_declaration(Parser *p)
+{
+    Token func_token = next_token(p->scanner);
+
+    Token identifier = consume(p, IDENTIFIER, "SyntaxError: Line %d column %d\nExpected identifier after 'func', got '%.*s'", 202);
+    consume(p, LEFT_PAREN, "SyntaxError: Line %d column %d\nExpected '(' after function name, got '%.*s'\nMaybe you forgot an opening '('?", 202);
+
+    Parameter **parameters;
+    int count = 0;
+
+    if (!check(p, RIGHT_PAREN))
+    {
+        size_t capacity = 4;
+        parameters = calloc(capacity, sizeof(Parameter *));
+
+        if (!parameters)
+            error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+        do
+        {
+            if (count > 255)
+                error_report(202, "SyntaxError: Line %d column %d\nFunctions may not have more than 255 arguments.", parameters[255]->identifier.line, parameters[255]->identifier.column);
+
+            if (count == capacity)
+            {
+                capacity *= 2;
+                Parameter **temp = realloc(parameters, capacity * sizeof(Parameter *));
+
+                if (!temp)
+                    error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+                parameters = temp;
+            }
+
+            Token next = peek_token(p->scanner);
+            if (next.type != DATATYPE_BOOL && next.type != DATATYPE_FLOAT && next.type != DATATYPE_INT && next.type != DATATYPE_STRING && next.type != DATATYPE_VOID)
+                error_report(202, "SyntaxError: Line %d column %d\nExpected datatype of parameter, got '%.*s'", next.line, next.column, next.len, next.lexeme);
+
+            next_token(p->scanner);
+
+            Token identifier = consume(p, IDENTIFIER, "SyntaxError: Line %d column %d\nExpected parameter name after datatype, got '%.*s'", 202);
+
+            Parameter *newParameter = malloc(sizeof(Parameter));
+            if (!newParameter)
+                error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+            newParameter->datatype = next.type;
+            newParameter->identifier = identifier;
+            parameters[count++] = newParameter;
+        } while (match(p, COMMA));
+    }
+
+    Token next = peek_token(p->scanner);
+    if (next.type != RIGHT_PAREN)
+    {
+        if (next.type == DATATYPE_BOOL || next.type == DATATYPE_FLOAT || next.type == DATATYPE_INT || next.type == DATATYPE_STRING || next.type == DATATYPE_VOID)
+            error_report(202, "SyntaxError: Line %d column %d\nExpected ')' after function parameters, got '%.*s'\n\nMaybe you forgot a comma between parameters?", next.line, next.column, next.len, next.lexeme);
+        else
+            error_report(202, "SyntaxError: Line %d column %d\nExpected ')' after function parameters, got '%.*s'\n\nMaybe you forgot a closing ')'?", next.line, next.column, next.len, next.lexeme);
+    }
+
+    next_token(p->scanner);
+    consume(p, ARROW, "SyntaxError: Line %d column %d\nExpected '->' after function parameters, got '%.*s'\n\nMaybe you forgot a '->' after ')'?", 202);
+
+    Token returnType = peek_token(p->scanner);
+    if (returnType.type != DATATYPE_BOOL && returnType.type != DATATYPE_FLOAT && returnType.type != DATATYPE_INT && returnType.type != DATATYPE_STRING && returnType.type != DATATYPE_VOID)
+        error_report(202, "SyntaxError: Line %d column %d\nExpected return datatype after '->', got '%.*s'");
+    next_token(p->scanner);
+
+    if (!check(p, LEFT_BRACE))
+        error_report(202, "SyntaxError: Line %d column %d\nExpected '{' after function return type, got '%.*s'\n\nMaybe you forgot an opening '{'?");
+
+    Statement *body = construct_block(p);
+
+    Statement *final = malloc(sizeof(Statement));
+    if (!final)
+        error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+    final->type = TYPE_FUNCDECL;
+
+    FuncDecl *declaration = malloc(sizeof(FuncDecl));
+    if (!declaration)
+        error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+    declaration->parameters = parameters;
+    declaration->paramCount = count;
+    declaration->returnType = returnType.type;
+    declaration->identifier = identifier;
+    declaration->body = body->block;
+
+    final->funcDecl = declaration;
+
+    final->span.startline = func_token.line;
+    final->span.startcol = func_token.column;
+
+    final->span.endline = body->span.endline;
+    final->span.endcol = body->span.endcol;
+
+    return final;
 }
 
 Statement *construct_block(Parser *p)
@@ -559,9 +813,7 @@ Statement *construct_block(Parser *p)
         error_report(201, "MemoryError: Failed to allocate memory for AST node.");
 
     size_t count = 0;
-    Token next = peek_token(p->scanner);
-
-    while (next.type != RIGHT_BRACE && next.type != TOKEN_EOF)
+    while (!check(p, RIGHT_BRACE) && !check(p, TOKEN_EOF))
     {
         if (count == capacity)
         {
@@ -575,80 +827,194 @@ Statement *construct_block(Parser *p)
         }
 
         statements[count++] = declaration(p);
-        next = peek_token(p->scanner);
     }
 
-    if (next.type != RIGHT_BRACE)
-        error_report(202, "ParsingError: Line %d column %d\nExpected '}', got '%.*s'", next.line, next.column, next.len, next.lexeme);
-
+    Token next = consume(p, RIGHT_BRACE, "SyntaxError: Line %d column %d\nExpected '}', got '%.*s'\n\nMaybe you forgot a closing '}'?", 202);
     Statement *block = construct_statement(NULL, next, TYPE_BLOCK, left_brace, statements, count);
-    next_token(p->scanner);
 
     return block;
+}
+
+Statement *expression_statement(Parser *p)
+{
+    Expression *expr = expression(p);
+    Token next = peek_token(p->scanner);
+
+    if (match(p, SEMICOLON))
+        return construct_statement(expr, next, TYPE_EXPR);
+    else
+        error_report(202, "SyntaxError: Line %d column %d\nExpected ';', got '%.*s'", next.line, next.column, next.len, next.lexeme);
+
+    return NULL;
 }
 
 // I chose to enforce braces to avoid the dangling else problem
 Statement *if_statement(Parser *p)
 {
     Token if_tok = next_token(p->scanner);
-    Token next = peek_token(p->scanner);
 
-    if (next.type != LEFT_PAREN)
-        error_report(202, "SyntaxError: Line %d column %d\nExpected '(' after 'if', got '%.*s'", next.line, next.column, next.len, next.lexeme);
-
-    next_token(p->scanner);
+    consume(p, LEFT_PAREN, "SyntaxError: Line %d column %d\nExpected '(' after 'if', got '%.*s'\n\nMaybe you forgot an opening '(' after 'if'?", 202);
     Expression *condition = expression(p);
 
-    next = peek_token(p->scanner);
-    if (next.type != RIGHT_PAREN)
-        error_report(202, "SyntaxError: Line %d column %d\nExpected ')' after if condition, got '%.*s'", next.line, next.column, next.len, next.lexeme);
+    consume(p, RIGHT_PAREN, "SyntaxError: Line %d column %d\nExpected ')' after if condition, got '%.*s'\n\nMaybe you forgot a closing ')'?", 202);
 
-    next_token(p->scanner);
-    next = peek_token(p->scanner);
-    if (next.type != LEFT_BRACE)
-        error_report(202, "SyntaxError: Line %d column %d\nExpected '{' after if condition, got '%.*s'", next.line, next.column, next.len, next.lexeme);
+    Token next = peek_token(p->scanner);
+    if (!check(p, LEFT_BRACE))
+        error_report(202, "SyntaxError: Line %d column %d\nExpected '{' after if condition, got '%.*s'\n\nBlocks in Atomic must be enclosed in braces.", next.line, next.column, next.len, next.lexeme);
 
     Statement *then_branch = construct_block(p);
     Statement *else_branch = NULL;
 
-    next = peek_token(p->scanner);
-    if (next.type == ELSE)
+    if (match(p, ELSE))
     {
-        next_token(p->scanner);
         next = peek_token(p->scanner);
 
-        if (next.type != LEFT_BRACE && next.type != IF)
-            error_report(202, "SyntaxError: Line %d column %d\nExpected '{' or 'if' after 'else', got '%.*s'", next.line, next.column, next.len, next.lexeme);
-        
-        if (next.type == LEFT_BRACE) else_branch = construct_block(p);
-        else else_branch = if_statement(p);
+        if (!check(p, LEFT_BRACE) && !check(p, IF))
+            error_report(202, "SyntaxError: Line %d column %d\nExpected '{' or 'if' after 'else', got '%.*s'\n\nBlocks in Atomic must be enclosed in braces.", next.line, next.column, next.len, next.lexeme);
+
+        if (check(p, LEFT_BRACE))
+            else_branch = construct_block(p);
+        else
+            else_branch = if_statement(p);
     }
 
     return construct_statement(condition, if_tok, TYPE_IF, then_branch, else_branch);
 }
 
 // While statement
-Statement *while_statement(Parser *p) {
+Statement *while_statement(Parser *p)
+{
     Token while_token = next_token(p->scanner);
-    Token next = peek_token(p->scanner);
 
-    if (next.type != LEFT_PAREN) 
-        error_report(202, "SyntaxError: Line %d column %d\nExpected '(' after 'while', got '%.*s'", next.line, next.column, next.len, next.lexeme);
-    
-    next_token(p->scanner);
+    consume(p, LEFT_PAREN, "SyntaxError: Line %d column %d\nExpected '(' after 'while', got '%.*s'", 202);
     Expression *condition = expression(p);
 
-    next = peek_token(p->scanner);
-    if (next.type != RIGHT_PAREN) 
-        error_report(202, "SyntaxError: Line %d column %d\nExpected ')' after while condition, got '%.*s'", next.line, next.column, next.len, next.lexeme);
+    consume(p, RIGHT_PAREN, "SyntaxError: Line %d column %d\nExpected ')' after while condition, got '%.*s'", 202);
 
-    next_token(p->scanner);
-    next = peek_token(p->scanner);
-    if (next.type != LEFT_BRACE) 
-        error_report(202, "SyntaxError: Line %d column %d\nExpected '{' after if condition, got '%.*s'", next.line, next.column, next.len, next.lexeme);
+    Token next = peek_token(p->scanner);
+    if (!check(p, LEFT_BRACE))
+        error_report(202, "SyntaxError: Line %d column %d\nExpected '{' after if condition, got '%.*s'\n\nBlocks in Atomic must be enclosed in braces.", next.line, next.column, next.len, next.lexeme);
 
     Statement *body = construct_block(p);
     return construct_statement(condition, while_token, TYPE_WHILE, body);
+}
+
+// for loops
+Statement *for_statement(Parser *p)
+{
+    Token for_token = next_token(p->scanner);
+    consume(p, LEFT_PAREN, "SyntaxError: Line %d column %d\nExpected '(' after 'for', got '%.*s'", 202);
+
+    Statement *initializer = NULL;
+    Expression *condition = NULL;
+    Expression *increment = NULL;
+
+    Token next = peek_token(p->scanner);
+    if (next.type == SEMICOLON)
+    {
+        next_token(p->scanner);
+        initializer = NULL;
+    }
+    else if (next.type == DATATYPE_BOOL || next.type == DATATYPE_FLOAT || next.type == DATATYPE_INT || next.type == DATATYPE_STRING || next.type == DATATYPE_VOID)
+    {
+        initializer = variable_declaration(p);
+    }
+    else
+    {
+        initializer = expression_statement(p);
+    }
+
+    if (!check(p, SEMICOLON))
+    {
+        condition = expression(p);
+    }
+    consume(p, SEMICOLON, "SyntaxError: Line %d column %d\nExpected ';' after loop condition, got '%.*s'", 202);
+
+    if (!check(p, RIGHT_PAREN))
+    {
+        increment = expression(p);
+    }
+
+    Token right_paren = consume(p, RIGHT_PAREN, "SyntaxError: Line %d column %d\nExpected ')' after for conditions, got '%.*s'", 202);
+
+    if (!check(p, LEFT_BRACE))
+    {
+        Token offending = peek_token(p->scanner);
+        error_report(202, "SyntaxError: Line %d column %d\nExpected '{' after for loop conditions, got '%.*s'\n\nBlocks in Atomic must be enclosed in braces.", offending.line, offending.column, offending.len, offending.lexeme);
+    }
+
+    Statement *body = construct_block(p);
+
+    if (increment != NULL)
+    {
+        Statement **newStmts = calloc(body->block->count + 1, sizeof(Statement *));
+        memcpy(newStmts, body->block->statements, body->block->count * sizeof(Statement *));
+
+        Statement *incrementStmt = construct_statement(increment, right_paren, TYPE_EXPR);
+        free(body->block->statements);
+
+        newStmts[body->block->count++] = incrementStmt;
+        body->block->statements = newStmts;
+    }
+    if (!condition)
+    {
+        Expression *trueNode = malloc(sizeof(Expression));
+
+        if (!trueNode)
+            error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+        trueNode->Literal.type = TYPE_TRUE;
+        trueNode->type = LITERAL;
+
+        condition = trueNode;
+    }
+
+    Statement *body_while = malloc(sizeof(Statement));
+    if (!body_while)
+        error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+    WhileStmt *whileStmt = malloc(sizeof(WhileStmt));
+    if (!whileStmt)
+        error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+    body_while->type = TYPE_WHILE;
+    body_while->whileStmt = whileStmt;
+    body_while->whileStmt->body = body;
+    body_while->whileStmt->condition = condition;
+
+    Statement *final;
+    if (initializer != NULL)
+    {
+        final = malloc(sizeof(Statement));
+        if (!final)
+            error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+        Block *finalBlock = malloc(sizeof(Block));
+        if (!finalBlock)
+            error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+        final->type = TYPE_BLOCK;
+        final->block = finalBlock;
+        final->block->count = 2;
+
+        Statement **finalStmts = calloc(2, sizeof(Statement *));
+        if (!finalStmts)
+            error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+
+        finalStmts[0] = initializer;
+        finalStmts[1] = body_while;
+
+        final->block->statements = finalStmts;
+    }
+    else
+        final = body_while;
+
+    final->span.startline = for_token.line;
+    final->span.startcol = for_token.column;
+    final->span.endline = body->span.endline;
+    final->span.endcol = body->span.endcol;
+
+    return final;
 }
 
 Program *parse(Parser *p)
@@ -701,8 +1067,10 @@ Program *parse(Parser *p)
 Statement *declaration(Parser *p)
 {
     Token next = peek_token(p->scanner);
-    if (next.type == DATATYPE_FLOAT || next.type == DATATYPE_INT || next.type == DATATYPE_STRING || next.type == DATATYPE_BOOL)
+    if (next.type == DATATYPE_FLOAT || next.type == DATATYPE_INT || next.type == DATATYPE_STRING || next.type == DATATYPE_BOOL || next.type == DATATYPE_VOID)
         return variable_declaration(p);
+    else if (next.type == FUNC)
+        return function_declaration(p);
 
     return statement(p);
 }
@@ -711,24 +1079,19 @@ Statement *statement(Parser *p)
 {
     Token next = peek_token(p->scanner);
 
-    switch (next.type) {
-        case LEFT_BRACE: return construct_block(p);
-        case IF: return if_statement(p);
-        case WHILE: return while_statement(p);
-        default: {
-            Expression *expr = expression(p);
-            next = peek_token(p->scanner);
-
-            if (next.type == SEMICOLON)
-            {
-                next_token(p->scanner);
-                return construct_statement(expr, next, TYPE_EXPR);
-            }
-            else
-                error_report(202, "ParsingError: Line %d column %d\nExpected ';', got '%.*s'", next.line, next.column, next.len, next.lexeme);
-        }
+    switch (next.type)
+    {
+    case LEFT_BRACE:
+        return construct_block(p);
+    case IF:
+        return if_statement(p);
+    case WHILE:
+        return while_statement(p);
+    case FOR:
+        return for_statement(p);
+    default:
+        return expression_statement(p);
     }
-    
 
     return NULL;
 }
@@ -742,7 +1105,8 @@ Expression *assignment(Parser *p)
 {
     Expression *expr = or(p);
 
-    if (peek_token(p->scanner).type == EQUAL)
+    Token operator = peek_token(p->scanner);
+    if (operator.type == PLUS_EQUAL || operator.type == EQUAL || operator.type == MINUS_EQUAL || operator.type == STAR_EQUAL || operator.type == MINUS_EQUAL || operator.type == MOD_EQUAL)
     {
         next_token(p->scanner);
         Expression *value = assignment(p);
@@ -750,7 +1114,7 @@ Expression *assignment(Parser *p)
         if (expr->type == VARIABLE)
         {
             Token identifier = expr->Variable.identifier;
-            return construct_assignment(identifier, value);
+            return construct_assignment(identifier, value, operator);
         }
 
         error_report(202, "SyntaxError: Line %d column %d\nInvalid assignment target", expr->span.startline, expr->span.startcol);
@@ -763,7 +1127,7 @@ Expression *or(Parser *p)
 {
     Expression *expr = and(p);
 
-    while (peek_token(p->scanner).type == OR)
+    while (check(p, OR))
     {
         Token operator = next_token(p->scanner);
         Expression *right = and(p);
@@ -778,7 +1142,7 @@ Expression *and(Parser *p)
 {
     Expression *expr = equality(p);
 
-    while (peek_token(p->scanner).type == AND)
+    while (check(p, AND))
     {
         Token operator = next_token(p->scanner);
         Expression *right = equality(p);
@@ -851,7 +1215,7 @@ Expression *factor(Parser *p)
     Expression *expr = unary(p);
     Token next = peek_token(p->scanner);
 
-    while (next.type == SLASH || next.type == STAR)
+    while (next.type == SLASH || next.type == STAR || next.type == MOD)
     {
         Token operator = next_token(p->scanner);
         Expression *right = unary(p);
@@ -867,19 +1231,13 @@ Expression *unary(Parser *p)
 {
     Token next = peek_token(p->scanner);
 
-    int startline = next.line;
-    int startcol = next.column;
-
     if (next.type == NOT || next.type == MINUS)
     {
         Token operator = next_token(p->scanner);
         Expression *right = unary(p);
 
-        int endline = right->span.endline;
-        int endcol = right->span.endcol;
-
         next = peek_token(p->scanner);
-        return construct_unary(operator, right, startline, endline, startcol, endcol);
+        return construct_unary(operator, right);
     }
 
     return postfix(p);
@@ -890,19 +1248,15 @@ Expression *postfix(Parser *p)
     // printf("Performing primary...\n");
     Expression *left = primary(p);
 
-    int startline = left->span.startline;
-    int startcol = left->span.startcol;
+    while (match(p, LEFT_PAREN))
+    {
+        left = finishCall(p, left);
+    }
 
-    Token next = peek_token(p->scanner);
-
-    if (next.type == PLUS_PLUS || next.type == MINUS_MINUS)
+    if (check(p, PLUS_PLUS) || check(p, MINUS_MINUS))
     {
         Token operator = next_token(p->scanner);
-
-        int endline = operator.line;
-        int endcol = operator.column + operator.len;
-
-        return construct_postfix(operator, left, startline, endline, startcol, endcol);
+        return construct_postfix(operator, left);
     }
 
     return left;
