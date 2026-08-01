@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include "stringPool.h"
 #include "lexer.h"
+#include "token.h"
 
 /* ===== Error Codes =====
     100: Failed allocation for scanner
@@ -320,6 +321,11 @@ Token scan_identifier(Scanner *s)
         else if (len == 4 && (memcmp(start, "func", 4) == 0))
             return (Token){.type = FUNC, .len = 4, .column = start_col, .lexeme = "func", .line = s->line};
         break;
+    }
+    case 'l':
+    {
+        if (len == 3 && (memcmp(start, "let", 3) == 0))
+            return (Token){.type = LET, .len = 3, .column = start_col, .lexeme = "let", .line = s->line};
     }
     case 'n':
     {

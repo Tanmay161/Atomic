@@ -8,6 +8,17 @@
 typedef struct Expression Expression;
 typedef struct Statement Statement;
 
+// Broader data type enum
+typedef enum {
+    TYPE_UNKNOWN,
+    LIT_INTEGER,
+    LIT_STRING,
+    LIT_FALSE,
+    LIT_TRUE,
+    LIT_FLOAT,
+    LIT_NIL,
+} DataType;
+
 // Statement types
 typedef enum {
     TYPE_EXPR,
@@ -16,6 +27,7 @@ typedef enum {
     TYPE_BLOCK,
     TYPE_IF,
     TYPE_WHILE,
+    TYPE_RETURN,
 } StatementType;
 
 // Eval type
@@ -91,7 +103,7 @@ typedef struct {
     Token identifier;
     TokenType returnType;
     Parameter **parameters;
-    int paramCount;
+    int arity;
 
     Block *body;
 } FuncDecl;
@@ -109,6 +121,11 @@ typedef struct {
     Statement *body;
 } WhileStmt;
 
+// Return statements
+typedef struct {
+    Expression *value;
+} ReturnStmt; 
+
 // Statement struct
 typedef struct Statement {
     SourceSpan span;
@@ -121,6 +138,7 @@ typedef struct Statement {
         Block *block;
         IfStmt *ifStmt;
         WhileStmt *whileStmt;
+        ReturnStmt *ReturnStmt;
     };
 } Statement;
 
@@ -128,6 +146,7 @@ typedef struct Statement {
 typedef struct Expression {
     EvalType type;
     SourceSpan span;
+    DataType inferred;
 
     union {
         // Binary: Any operation between two operations 

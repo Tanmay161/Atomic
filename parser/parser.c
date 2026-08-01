@@ -5,8 +5,9 @@
 #include <stddef.h>
 
 #include "parser.h"
-#include "lexer.h"
+#include "token.h"
 #include "ast.h"
+#include "shared.h"
 
 /* ===== Error Codes =====
     200: Unable to allocate memory for parser
@@ -49,6 +50,7 @@ Statement *expression_statement(Parser *p);
 Statement *if_statement(Parser *p);
 Statement *while_statement(Parser *p);
 Statement *for_statement(Parser *p);
+Statement *return_statement(Parser *p);
 
 Token consume(Parser *p, TokenType type, const char *message, int errorCode);
 int check(Parser *p, TokenType type);
@@ -61,10 +63,6 @@ void synchronize(Parser *p);
 void output_expression(Expression *expr);
 void output_statement(Statement *statement);
 void output_block(Block *block);
-
-// Error reporting
-void error_report(int exitCode, const char *message, ...);
-// void verror_report(int exitCode, const char *message, va_list args);
 
 int main()
 {
@@ -108,12 +106,12 @@ void output_statement(Statement *statement)
     {
         printf("Function declaration\n");
         printf("Identifier: %.*s\n", statement->funcDecl->identifier.len, statement->funcDecl->identifier.lexeme);
-        printf("Parameter count: %d\n", statement->funcDecl->paramCount);
+        printf("Parameter count: %d\n", statement->funcDecl->arity);
 
         if (statement->funcDecl->parameters != NULL)
         {
             printf("Parameters: \n");
-            for (int i = 0; i < statement->funcDecl->paramCount; i++)
+            for (int i = 0; i < statement->funcDecl->arity; i++)
             {
                 printf("%.*s\n", statement->funcDecl->parameters[i]->identifier.len, statement->funcDecl->parameters[i]->identifier.lexeme);
             }
@@ -154,6 +152,17 @@ void output_statement(Statement *statement)
         printf("\n");
         printf("Body: ");
         output_block(statement->whileStmt->body->block);
+        printf("\n");
+        break;
+    }
+    case TYPE_RETURN:
+    {
+        printf("return ");
+        if (statement->ReturnStmt->value != NULL) 
+            output_expression(statement->ReturnStmt->value);
+        else
+            printf("nil");
+        
         printf("\n");
         break;
     }
@@ -370,18 +379,6 @@ void synchronize(Parser *p)
     }
 }
 
-void error_report(int exitCode, const char *message, ...)
-{
-    va_list args;
-    va_start(args, message);
-
-    vfprintf(stderr, message, args);
-    fprintf(stderr, "\n");
-
-    va_end(args);
-    exit(exitCode);
-}
-
 /* void verror_report(int exitCode, const char *message, va_list args) {
     vfprintf(stderr, message, args);
     fprintf(stderr, "\n");
@@ -402,6 +399,8 @@ Expression *construct_binary(Expression *left, Token operator, Expression *right
     expression->Binary.Left = left;
     expression->Binary.Operator = operator;
     expression->Binary.Right = right;
+
+    expression->inferred = TYPE_UNKNOWN;
 
     expression->span.startline = left->span.startline;
     expression->span.startcol = left->span.startcol;
@@ -424,6 +423,8 @@ Expression *construct_logical(Expression *left, Token operator, Expression *righ
     expression->Logical.Left = left;
     expression->Logical.Operator = operator;
     expression->Logical.Right = right;
+        
+    expression->inferred = TYPE_UNKNOWN;
 
     expression->span.startline = left->span.startline;
     expression->span.startcol = left->span.startcol;
@@ -446,6 +447,8 @@ Expression *construct_unary(Token operator, Expression *right)
     expression->Unary.Operator = operator;
     expression->Unary.Expr = right;
 
+    expression->inferred = TYPE_UNKNOWN;
+
     expression->span.startline = operator.line;
     expression->span.startcol = operator.column;
     expression->span.endline = right->span.endline;
@@ -466,6 +469,8 @@ Expression *construct_postfix(Token operator, Expression *left)
     expression->type = POSTFIX;
     expression->Postfix.Expr = left;
     expression->Postfix.Operator = operator;
+
+    expression->inferred = TYPE_UNKNOWN;
 
     expression->span.startline = left->span.startline;
     expression->span.startcol = left->span.startcol;
@@ -489,6 +494,8 @@ Expression *construct_assignment(Token identifier, Expression *value, Token oper
     expression->Assignment.value = value;
     expression->Assignment.operator = operator;
 
+    expression->inferred = TYPE_UNKNOWN;
+
     expression->span.startline = identifier.line;
     expression->span.startcol = identifier.column;
     expression->span.endline = value->span.endline;
@@ -510,6 +517,8 @@ Expression *construct_call(Expression *callee, Expression **args, int argCount, 
     expression->Call.callee = callee;
     expression->Call.arguments = args;
     expression->Call.argCount = argCount;
+
+    expression->inferred = TYPE_UNKNOWN;
 
     expression->span.startline = callee->span.startline;
     expression->span.startcol = callee->span.startcol;
@@ -679,6 +688,25 @@ Statement *construct_statement(Expression *expr, Token semicolon, StatementType 
 
         break;
     }
+    case TYPE_RETURN:
+    {
+        ReturnStmt *return_stmt = malloc(sizeof(ReturnStmt));
+        if (!return_stmt)
+            error_report(202, "MemoryError: Unable to allocate memory for AST node.");
+        
+        Token return_token = va_arg(args, Token);
+
+        stmt->ReturnStmt = return_stmt;
+        stmt->ReturnStmt->value = expr;
+        
+        stmt->span.startline = return_token.line;
+        stmt->span.startcol = return_token.column;
+
+        stmt->span.endline = semicolon.line;
+        stmt->span.endcol = semicolon.column;
+
+        break;
+    }
     }
 
     return stmt;
@@ -767,7 +795,7 @@ Statement *function_declaration(Parser *p)
 
     Token returnType = peek_token(p->scanner);
     if (returnType.type != DATATYPE_BOOL && returnType.type != DATATYPE_FLOAT && returnType.type != DATATYPE_INT && returnType.type != DATATYPE_STRING && returnType.type != DATATYPE_VOID)
-        error_report(202, "SyntaxError: Line %d column %d\nExpected return datatype after '->', got '%.*s'");
+        error_report(202, "SyntaxError: Line %d column %d\nExpected return datatype after '->', got '%.*s'", returnType.line, returnType.column, returnType.len, returnType.lexeme);
     next_token(p->scanner);
 
     if (!check(p, LEFT_BRACE))
@@ -786,7 +814,7 @@ Statement *function_declaration(Parser *p)
         error_report(201, "MemoryError: Failed to allocate memory for AST node.");
 
     declaration->parameters = parameters;
-    declaration->paramCount = count;
+    declaration->arity = count;
     declaration->returnType = returnType.type;
     declaration->identifier = identifier;
     declaration->body = body->block;
@@ -947,13 +975,14 @@ Statement *for_statement(Parser *p)
 
     if (increment != NULL)
     {
-        Statement **newStmts = calloc(body->block->count + 1, sizeof(Statement *));
-        memcpy(newStmts, body->block->statements, body->block->count * sizeof(Statement *));
+        Statement **newStmts = realloc(body->block->statements, (body->block->count + 1) * sizeof(Statement *));
 
+        if (!newStmts)
+            error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+        
         Statement *incrementStmt = construct_statement(increment, right_paren, TYPE_EXPR);
-        free(body->block->statements);
-
         newStmts[body->block->count++] = incrementStmt;
+
         body->block->statements = newStmts;
     }
     if (!condition)
@@ -1017,6 +1046,17 @@ Statement *for_statement(Parser *p)
     return final;
 }
 
+Statement *return_statement(Parser *p) {
+    Token return_token = next_token(p->scanner);
+    Expression *value = NULL;
+
+    if (!check(p, SEMICOLON))
+        value = expression(p);
+    
+    Token semicolon = consume(p, SEMICOLON, "SyntaxError: Line %d column %d\nExpected ';', got '%.*s'\nMaybe you forgot a ';' to end the statement?", 202);
+    return construct_statement(value, semicolon, TYPE_RETURN, return_token);
+}
+
 Program *parse(Parser *p)
 {
     size_t capacity = 8;
@@ -1067,7 +1107,7 @@ Program *parse(Parser *p)
 Statement *declaration(Parser *p)
 {
     Token next = peek_token(p->scanner);
-    if (next.type == DATATYPE_FLOAT || next.type == DATATYPE_INT || next.type == DATATYPE_STRING || next.type == DATATYPE_BOOL || next.type == DATATYPE_VOID)
+    if (next.type == LET || next.type == DATATYPE_FLOAT || next.type == DATATYPE_INT || next.type == DATATYPE_STRING || next.type == DATATYPE_BOOL || next.type == DATATYPE_VOID)
         return variable_declaration(p);
     else if (next.type == FUNC)
         return function_declaration(p);
@@ -1089,6 +1129,8 @@ Statement *statement(Parser *p)
         return while_statement(p);
     case FOR:
         return for_statement(p);
+    case RETURN:
+        return return_statement(p);
     default:
         return expression_statement(p);
     }
