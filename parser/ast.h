@@ -102,7 +102,7 @@ typedef struct {
 typedef struct {
     Token identifier;
     TokenType returnType;
-    Parameter **parameters;
+    Parameter *parameters;
     int arity;
 
     Block *body;

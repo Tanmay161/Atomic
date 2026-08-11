@@ -113,7 +113,7 @@ void output_statement(Statement *statement)
             printf("Parameters: \n");
             for (int i = 0; i < statement->funcDecl->arity; i++)
             {
-                printf("%.*s\n", statement->funcDecl->parameters[i]->identifier.len, statement->funcDecl->parameters[i]->identifier.lexeme);
+                printf("%.*s\n", statement->funcDecl->parameters[i].identifier.len, statement->funcDecl->parameters[i].identifier.lexeme);
             }
         }
 
@@ -736,13 +736,13 @@ Statement *function_declaration(Parser *p)
     Token identifier = consume(p, IDENTIFIER, "SyntaxError: Line %d column %d\nExpected identifier after 'func', got '%.*s'", 202);
     consume(p, LEFT_PAREN, "SyntaxError: Line %d column %d\nExpected '(' after function name, got '%.*s'\nMaybe you forgot an opening '('?", 202);
 
-    Parameter **parameters;
+    Parameter *parameters;
     int count = 0;
 
     if (!check(p, RIGHT_PAREN))
     {
         size_t capacity = 4;
-        parameters = calloc(capacity, sizeof(Parameter *));
+        parameters = calloc(capacity, sizeof(Parameter));
 
         if (!parameters)
             error_report(201, "MemoryError: Failed to allocate memory for AST node.");
@@ -750,12 +750,12 @@ Statement *function_declaration(Parser *p)
         do
         {
             if (count > 255)
-                error_report(202, "SyntaxError: Line %d column %d\nFunctions may not have more than 255 arguments.", parameters[255]->identifier.line, parameters[255]->identifier.column);
+                error_report(202, "SyntaxError: Line %d column %d\nFunctions may not have more than 255 arguments.", parameters[255].identifier.line, parameters[255].identifier.column);
 
             if (count == capacity)
             {
                 capacity *= 2;
-                Parameter **temp = realloc(parameters, capacity * sizeof(Parameter *));
+                Parameter *temp = realloc(parameters, capacity * sizeof(Parameter));
 
                 if (!temp)
                     error_report(201, "MemoryError: Failed to allocate memory for AST node.");
@@ -771,12 +771,10 @@ Statement *function_declaration(Parser *p)
 
             Token identifier = consume(p, IDENTIFIER, "SyntaxError: Line %d column %d\nExpected parameter name after datatype, got '%.*s'", 202);
 
-            Parameter *newParameter = malloc(sizeof(Parameter));
-            if (!newParameter)
-                error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+            Parameter newParameter;
 
-            newParameter->datatype = next.type;
-            newParameter->identifier = identifier;
+            newParameter.datatype = next.type;
+            newParameter.identifier = identifier;
             parameters[count++] = newParameter;
         } while (match(p, COMMA));
     }
