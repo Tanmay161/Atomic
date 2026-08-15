@@ -14,14 +14,18 @@ void initChunk(Chunk* chunk) {
     initValueArray(&chunk->constants);
 }
 
-void writeChunk(Chunk* chunk, uint8_t byte) {
+void writeChunk(Chunk* chunk, uint8_t byte, SourceSpan span) {
     if (chunk->capacity < chunk->count + 1) {
         int oldCapacity = chunk->capacity;
         chunk->capacity = GROW_CAPACITY(oldCapacity);
+
         chunk->code = GROW_ARRAY(uint8_t, chunk->code, oldCapacity, chunk->capacity);
+        chunk->spans = GROW_ARRAY(SourceSpan, chunk->spans, oldCapacity, chunk->capacity);
     }
 
-    chunk->code[chunk->count++] = byte;
+    chunk->code[chunk->count] = byte;
+    chunk->spans[chunk->count++] = span;
+
     printf("%d\n", chunk->count);
 }
 
@@ -30,14 +34,14 @@ int addConstant(Chunk *chunk, Value value) {
     return chunk->constants.count - 1;
 }
 
-void writeU16(Chunk *chunk, int index) {
+void writeU16(Chunk *chunk, int index, SourceSpan span) {
     uint16_t pos = (uint16_t) index;
 
     uint8_t low = (pos & 0xFF);
     uint8_t high = ((pos >> 8) & 0xFF);
 
-    writeChunk(chunk, low);
-    writeChunk(chunk, high);
+    writeChunk(chunk, low, span);
+    writeChunk(chunk, high, span);
 }
 
 uint16_t readU16(uint8_t low, uint8_t high) {

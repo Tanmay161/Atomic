@@ -18,20 +18,7 @@
 // Parser constructor
 Parser *init_parser(char *file_name);
 
-// === Main parsing functions ===
-Expression *expression(Parser *p);
-Expression *assignment(Parser *p);
-Expression *or(Parser *p);
-Expression *and(Parser *p);
-Expression *equality(Parser *p);
-Expression *comparison(Parser *p);
-Expression *term(Parser *p);
-Expression *factor(Parser *p);
-Expression *unary(Parser *p);
-Expression *postfix(Parser *p);
-Expression *primary(Parser *p);
-Statement *statement(Parser *p);
-Statement *declaration(Parser *p);
+// Main parsing function
 Program *parse(Parser *p);
 
 // === Helpers ===
@@ -51,6 +38,8 @@ Statement *if_statement(Parser *p);
 Statement *while_statement(Parser *p);
 Statement *for_statement(Parser *p);
 Statement *return_statement(Parser *p);
+Statement *statement(Parser *p);
+Statement *declaration(Parser *p);
 
 Token consume(Parser *p, TokenType type, const char *message, int errorCode);
 int check(Parser *p, TokenType type);
@@ -63,6 +52,303 @@ void synchronize(Parser *p);
 void output_expression(Expression *expr);
 void output_statement(Statement *statement);
 void output_block(Block *block);
+
+static inline ParseRule *getRule(TokenType type);
+static Expression *expression(Parser *p);
+static Expression *parsePrecedence(Parser *p, Precedence precedence);
+
+static Expression *parse_number(Parser *p, Expression *left) {
+    Token prev = next_token(p->scanner);
+    Expression *expr = malloc(sizeof(Expression));
+
+    if (!expr)
+        error_report(201, "Failed to allocate memory for AST node.");
+
+    expr->type = LITERAL;
+
+    char *buf = malloc(prev.len + 1);
+
+    if (!buf)
+        error_report(201, "Failed to allocate memory for AST node.");
+
+    memcpy(buf, prev.lexeme, prev.len);
+    buf[prev.len] = '\0';
+
+    expr->span.startline = prev.line;
+    expr->span.startcol = prev.column;
+
+    expr->span.endline = prev.line;
+    expr->span.endcol = prev.column + prev.len;
+
+    if (prev.type == INTEGER) {
+        expr->Literal.type = TYPE_INTEGER;
+
+        long long value = strtoll(buf, NULL, 10);
+
+        expr->Literal.Value.int_value = value;
+    }
+
+    else if (prev.type == FLOAT) {
+        expr->Literal.type = TYPE_FLOAT;
+
+        double value = strtod(buf, NULL);
+
+        expr->Literal.Value.float_value = value;
+    }
+
+    free(buf);
+    return expr;
+}
+
+static Expression *grouping(Parser *p, Expression *left) {
+    Token l_paren = next_token(p->scanner);
+    Expression *expr = parsePrecedence(p, PREC_ASSIGNMENT);
+    Token r_paren = consume(p, RIGHT_PAREN, "SyntaxError: Line %d column %d\nExpected ')' to close expression, got '%.*s'\n\nMaybe you forgot a closing ')'?", 202);
+
+    Expression *final = malloc(sizeof(Expression));
+    if (!final) 
+        error_report(201, "MemoryError: Failed to allocate memory for AST node.\n");
+
+    final->type = GROUPING;
+    final->Grouping.Expr = expr;
+
+    final->span.startline = l_paren.line;
+    final->span.startcol = l_paren.column;
+
+    final->span.endline = r_paren.line;
+    final->span.endcol = r_paren.column + 1;
+
+    return final;
+}
+
+static Expression *unary(Parser *p, Expression *left) {
+    Token operator = next_token(p->scanner);
+    Expression *expr = parsePrecedence(p, PREC_UNARY);
+
+    return construct_unary(operator, expr);
+}
+
+static Expression *binary(Parser *p, Expression *left) {
+    Token operator = next_token(p->scanner);
+    ParseRule *rule = getRule(operator.type);
+    Expression *right = parsePrecedence(p, (Precedence)(rule->precedence + 1));
+
+    return construct_binary(left, operator, right);
+}
+
+static Expression *postfix(Parser *p, Expression *left) {    
+    while (match(p, LEFT_PAREN))
+    {
+        left = finishCall(p, left);
+    }
+
+    if (check(p, PLUS_PLUS) || check(p, MINUS_MINUS))
+    {
+        Token operator = next_token(p->scanner);
+        return construct_postfix(operator, left);
+    }
+
+    return left;
+}
+
+static Expression *assignment(Parser *p, Expression *left) {
+    Token operator = next_token(p->scanner);
+    Expression *value = parsePrecedence(p, PREC_ASSIGNMENT);
+
+    if (left->type == VARIABLE)
+    {
+        Token identifier = left->Variable.identifier;
+        return construct_assignment(identifier, value, operator);
+    }
+    else     
+        error_report(202, "SyntaxError: Line %d column %d\nInvalid assignment target", left->span.startline, left->span.startcol);
+    
+    return left;
+}
+
+static Expression *identifier(Parser *p, Expression *left) {
+    Expression *expr = malloc(sizeof(Expression));
+    Token next = next_token(p->scanner);
+
+    if (!expr)
+        error_report(202, "MemoryError: Failed to allocate memory for AST node.\n");
+
+    expr->type = VARIABLE;
+    expr->Variable.identifier = next;
+
+    expr->span.startline = next.line;
+    expr->span.startcol = next.column;
+
+    expr->span.endline = next.line;
+    expr->span.endcol = next.column + next.len;
+
+    return expr;
+}
+
+static Expression *boolean(Parser *p, Expression *left) {
+    Token next = next_token(p->scanner);
+
+    Expression *expr = malloc(sizeof(Expression));
+    if (!expr)
+        error_report(201, "MemoryError: Failed to allocate memory for AST node.");
+    
+    expr->type = LITERAL;
+
+    if (next.type == TRUE) expr->Literal.type = TYPE_TRUE;
+    else expr->Literal.type = TYPE_FALSE;
+
+    expr->span.startline = next.line;
+    expr->span.startcol = next.column;
+    
+    expr->span.endline = next.line;
+    expr->span.endcol = next.column + next.len;
+
+    return expr;
+}
+
+static Expression *nil(Parser *p, Expression *left) {
+    Token next = next_token(p->scanner);
+    Expression *expr = malloc(sizeof(Expression));
+
+    if (!expr)
+    {
+        fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
+        exit(201);
+    }
+
+    expr->type = LITERAL;
+    expr->Literal.type = TYPE_NIL;
+
+    expr->span.startline = next.line;
+    expr->span.startcol = next.column;
+
+    expr->span.endline = next.line;
+    expr->span.endcol = next.column + next.len;
+
+    return expr;
+}
+
+static Expression *parse_string(Parser *p, Expression *left) {
+    Token next = next_token(p->scanner);
+    Expression *expr = malloc(sizeof(Expression));
+
+    if (!expr)
+    {
+        fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
+        exit(201);
+    }
+
+    expr->type = LITERAL;
+
+    expr->Literal.type = TYPE_STRING;
+    expr->Literal.Value.len = next.len;
+    expr->Literal.Value.lexeme = next.lexeme;
+
+    expr->span.startline = next.line;
+    expr->span.startcol = next.column - 1;
+
+    expr->span.endline = next.line;
+    expr->span.endcol = next.column + next.len + 1;
+
+    return expr;
+}
+
+static Expression *unexpected_end(Parser *p, Expression *expression) {
+    error_report(202, "SyntaxError: Line %d column %d\nExpected expression, got <EOF>\n", p->scanner->line, p->scanner->column);
+    return NULL;
+}
+
+static Expression *error(Parser *p, Expression *expression) {
+    Token next = next_token(p->scanner);
+    error_report(next.code, next.lexeme);
+    return NULL;
+} 
+
+// Parse table
+ParseRule rules[] = {
+    [LEFT_PAREN] = {grouping, NULL, postfix, PREC_POSTFIX},
+    [RIGHT_PAREN] = {NULL, NULL, NULL, PREC_NONE},
+    [LEFT_BRACE] = {NULL, NULL, NULL, PREC_NONE},
+    [RIGHT_BRACE] = {NULL, NULL, NULL, PREC_NONE},
+    [COMMA] = {NULL, NULL, NULL, PREC_NONE},
+    [DOT] = {NULL, NULL, NULL, PREC_NONE},
+    [MINUS] = {unary, binary, NULL, PREC_TERM},
+    [PLUS] = {NULL, binary, NULL, PREC_TERM},
+    [SEMICOLON] = {NULL, NULL, NULL, PREC_NONE},
+    [SLASH] = {NULL, binary, NULL, PREC_FACTOR},
+    [STAR] = {NULL, binary, NULL, PREC_FACTOR},
+    [LEFT_BRACKET] = {NULL, NULL, NULL, PREC_POSTFIX},
+    [RIGHT_BRACKET] = {NULL, NULL, NULL, PREC_NONE},
+    [PLUS_PLUS] = {NULL, NULL, postfix, PREC_POSTFIX},
+    [MINUS_MINUS] = {NULL, NULL, postfix, PREC_POSTFIX},
+    [NOT_EQUAL] = {NULL, binary, NULL, PREC_EQUALITY},
+    [EQUAL] = {NULL, assignment, NULL, PREC_ASSIGNMENT},
+    [EQUAL_EQUAL] = {NULL, binary, NULL, PREC_EQUALITY},
+    [GREATER] = {NULL, binary, NULL, PREC_COMPARISON},
+    [MOD] = {NULL, binary, NULL, PREC_FACTOR},
+    [MOD_EQUAL] = {NULL, assignment, NULL, PREC_ASSIGNMENT},
+    [GREATER_EQUAL] = {NULL, binary, NULL, PREC_COMPARISON},
+    [LESS] = {NULL, binary, NULL, PREC_COMPARISON},
+    [LESS_EQUAL] = {NULL, binary, NULL, PREC_COMPARISON},
+    [PLUS_EQUAL] = {NULL, assignment, NULL, PREC_ASSIGNMENT},
+    [MINUS_EQUAL] = {NULL, assignment, NULL, PREC_ASSIGNMENT},
+    [STAR_EQUAL] = {NULL, assignment, NULL, PREC_ASSIGNMENT},
+    [SLASH_EQUAL] = {NULL, assignment, NULL, PREC_ASSIGNMENT},
+    [ARROW] = {NULL, NULL, NULL, PREC_NONE},
+    [IDENTIFIER] = {identifier, NULL, NULL, PREC_PRIMARY},
+    [STRING] = {parse_string, NULL, NULL, PREC_PRIMARY},
+    [INTEGER] = {parse_number, NULL, NULL, PREC_PRIMARY},
+    [FLOAT] = {parse_number, NULL, NULL, PREC_PRIMARY},
+    [FUNC] = {NULL, NULL, NULL, PREC_NONE},
+    [DATATYPE_INT] = {NULL, NULL, NULL, PREC_NONE},
+    [DATATYPE_FLOAT] = {NULL, NULL, NULL, PREC_NONE},
+    [DATATYPE_STRING] = {NULL, NULL, NULL, PREC_NONE},
+    [DATATYPE_BOOL] = {NULL, NULL, NULL, PREC_NONE},
+    [DATATYPE_VOID] = {NULL, NULL, NULL, PREC_NONE},
+    [LET] = {NULL, NULL, NULL, PREC_NONE},
+    [AND] = {NULL, binary, NULL, PREC_AND},
+    [OR] = {NULL, binary, NULL, PREC_OR},
+    [IF] = {NULL, NULL, NULL, PREC_NONE},
+    [ELSE] = {NULL, NULL, NULL, PREC_NONE},
+    [FOR] = {NULL, NULL, NULL, PREC_NONE},
+    [NIL] = {nil, NULL, NULL, PREC_PRIMARY},
+    [RETURN] = {NULL, NULL, NULL, PREC_NONE},
+    [WHILE] = {NULL, NULL, NULL, PREC_NONE},
+    [TRUE] = {boolean, NULL, NULL, PREC_PRIMARY},
+    [FALSE] = {boolean, NULL, NULL, PREC_PRIMARY},
+    [NOT] = {unary, NULL, NULL, PREC_UNARY},
+    [TOKEN_EOF] = {unexpected_end, NULL, NULL, PREC_NONE},
+    [TOKEN_ERROR] = {error, NULL, NULL, PREC_NONE},
+};
+
+static Expression *parsePrecedence(Parser *p, Precedence precedence) {
+    Token next = peek_token(p->scanner);
+    ParseFn prefixRule = getRule(next.type)->prefix;
+
+    if (!prefixRule)
+        error_report(202, "SyntaxError: Line %d column %d\nExpected expression, got '%.*s'", next.line, next.column, next.len, next.lexeme);
+    
+    Expression *expr = prefixRule(p, NULL);
+
+    next = peek_token(p->scanner);
+    ParseRule *rule = getRule(next.type);
+
+    while (precedence <= rule->precedence) {
+        ParseFn nextRule = rule->infix;
+        if (!nextRule) nextRule = rule->postfix;
+        if (!nextRule) break;
+        
+        expr = nextRule(p, expr);
+        next = peek_token(p->scanner);
+        rule = getRule(next.type);
+    }
+
+    return expr;
+}
+
+static inline ParseRule *getRule(TokenType type) {
+    return &rules[type];
+}
 
 int main()
 {
@@ -254,6 +540,7 @@ void output_expression(Expression *expr)
             break;
         }
         }
+        break;
     }
     case VARIABLE:
     {
@@ -262,7 +549,7 @@ void output_expression(Expression *expr)
     }
     case ASSIGNMENT:
     {
-        printf("%.*s = ", expr->Assignment.identifier.len, expr->Assignment.identifier.lexeme);
+        printf("%.*s %.*s ", expr->Assignment.identifier.len, expr->Assignment.identifier.lexeme, expr->Assignment.operator.len, expr->Assignment.operator.lexeme);
         output_expression(expr->Assignment.value);
         break;
     }
@@ -310,9 +597,7 @@ int match(Parser *p, TokenType type)
     int result = check(p, type);
 
     if (result)
-    {
         next_token(p->scanner);
-    }
 
     return result;
 }
@@ -344,47 +629,6 @@ Parser *init_parser(char *file_name)
 
     return parser;
 }
-
-// Still need to think about language design choice and whether or not the program should exit at the first error
-void synchronize(Parser *p)
-{
-    next_token(p->scanner);
-
-    Token next = peek_token(p->scanner);
-    while (next.type != TOKEN_EOF)
-    {
-        if (next.type == SEMICOLON)
-        {
-            next_token(p->scanner);
-            return;
-        }
-
-        switch (next.type)
-        {
-        case FOR:
-        case IF:
-        case WHILE:
-        case DATATYPE_FLOAT:
-        case DATATYPE_INT:
-        case DATATYPE_STRING:
-        case DATATYPE_VOID:
-        case RETURN:
-            return;
-        default:
-            return;
-        }
-
-        next_token(p->scanner);
-        next = peek_token(p->scanner);
-    }
-}
-
-/* void verror_report(int exitCode, const char *message, va_list args) {
-    vfprintf(stderr, message, args);
-    fprintf(stderr, "\n");
-
-    exit(exitCode);
-} */
 
 Expression *construct_binary(Expression *left, Token operator, Expression *right)
 {
@@ -450,7 +694,7 @@ Expression *construct_unary(Token operator, Expression *right)
     expression->inferred = TYPE_UNKNOWN;
 
     expression->span.startline = operator.line;
-    expression->span.startcol = operator.column;
+    expression->span.startcol = operator.column + operator.len;
     expression->span.endline = right->span.endline;
     expression->span.endcol = right->span.endcol;
 
@@ -554,7 +798,7 @@ Expression *finishCall(Parser *p, Expression *callee)
 
                 args = temp;
             }
-            args[count++] = expression(p);
+            args[count++] = parsePrecedence(p, PREC_ASSIGNMENT);
         } while (match(p, COMMA));
     }
 
@@ -611,8 +855,8 @@ Statement *construct_statement(Expression *expr, Token semicolon, StatementType 
         stmt->varDecl->type = type;
         stmt->varDecl->initializer = expr;
 
-        stmt->span.startline = expr->span.startline;
-        stmt->span.startcol = expr->span.startcol;
+        stmt->span.startline = identifier.line;
+        stmt->span.startcol = identifier.column;
 
         stmt->span.endline = semicolon.line;
         stmt->span.endcol = semicolon.column;
@@ -722,7 +966,7 @@ Statement *variable_declaration(Parser *p)
     if (check(p, EQUAL))
     {
         next_token(p->scanner);
-        initializer = expression(p);
+        initializer = parsePrecedence(p, PREC_ASSIGNMENT);
     }
 
     Token next = consume(p, SEMICOLON, "SyntaxError: Line %d column %d\nExpected ';' after declaration, got '%.*s'\n\nMaybe you forgot a semicolon?", 202);
@@ -736,7 +980,7 @@ Statement *function_declaration(Parser *p)
     Token identifier = consume(p, IDENTIFIER, "SyntaxError: Line %d column %d\nExpected identifier after 'func', got '%.*s'", 202);
     consume(p, LEFT_PAREN, "SyntaxError: Line %d column %d\nExpected '(' after function name, got '%.*s'\nMaybe you forgot an opening '('?", 202);
 
-    Parameter *parameters;
+    Parameter *parameters = NULL;
     int count = 0;
 
     if (!check(p, RIGHT_PAREN))
@@ -863,7 +1107,7 @@ Statement *construct_block(Parser *p)
 
 Statement *expression_statement(Parser *p)
 {
-    Expression *expr = expression(p);
+    Expression *expr = parsePrecedence(p, PREC_ASSIGNMENT);
     Token next = peek_token(p->scanner);
 
     if (match(p, SEMICOLON))
@@ -880,7 +1124,7 @@ Statement *if_statement(Parser *p)
     Token if_tok = next_token(p->scanner);
 
     consume(p, LEFT_PAREN, "SyntaxError: Line %d column %d\nExpected '(' after 'if', got '%.*s'\n\nMaybe you forgot an opening '(' after 'if'?", 202);
-    Expression *condition = expression(p);
+    Expression *condition = parsePrecedence(p, PREC_ASSIGNMENT);
 
     consume(p, RIGHT_PAREN, "SyntaxError: Line %d column %d\nExpected ')' after if condition, got '%.*s'\n\nMaybe you forgot a closing ')'?", 202);
 
@@ -913,7 +1157,7 @@ Statement *while_statement(Parser *p)
     Token while_token = next_token(p->scanner);
 
     consume(p, LEFT_PAREN, "SyntaxError: Line %d column %d\nExpected '(' after 'while', got '%.*s'", 202);
-    Expression *condition = expression(p);
+    Expression *condition = parsePrecedence(p, PREC_ASSIGNMENT);
 
     consume(p, RIGHT_PAREN, "SyntaxError: Line %d column %d\nExpected ')' after while condition, got '%.*s'", 202);
 
@@ -951,14 +1195,13 @@ Statement *for_statement(Parser *p)
     }
 
     if (!check(p, SEMICOLON))
-    {
-        condition = expression(p);
-    }
+        condition = parsePrecedence(p, PREC_ASSIGNMENT);
+
     consume(p, SEMICOLON, "SyntaxError: Line %d column %d\nExpected ';' after loop condition, got '%.*s'", 202);
 
     if (!check(p, RIGHT_PAREN))
     {
-        increment = expression(p);
+        increment = parsePrecedence(p, PREC_ASSIGNMENT);
     }
 
     Token right_paren = consume(p, RIGHT_PAREN, "SyntaxError: Line %d column %d\nExpected ')' after for conditions, got '%.*s'", 202);
@@ -1049,7 +1292,7 @@ Statement *return_statement(Parser *p) {
     Expression *value = NULL;
 
     if (!check(p, SEMICOLON))
-        value = expression(p);
+        value = parsePrecedence(p, PREC_ASSIGNMENT);
     
     Token semicolon = consume(p, SEMICOLON, "SyntaxError: Line %d column %d\nExpected ';', got '%.*s'\nMaybe you forgot a ';' to end the statement?", 202);
     return construct_statement(value, semicolon, TYPE_RETURN, return_token);
@@ -1071,10 +1314,7 @@ Program *parse(Parser *p)
     Statement **statements = malloc(capacity * sizeof(Statement *));
 
     if (!statements)
-    {
-        fprintf(stderr, "MemoryError: Failed to allocate memory for Statement Array.\n");
-        exit(201);
-    }
+        error_report(201, "MemoryError: Failed to allocate memory for Statement Array.");
 
     while (peek_token(p->scanner).type != TOKEN_EOF)
     {
@@ -1134,391 +1374,4 @@ Statement *statement(Parser *p)
     }
 
     return NULL;
-}
-
-Expression *expression(Parser *p)
-{
-    return assignment(p);
-}
-
-Expression *assignment(Parser *p)
-{
-    Expression *expr = or(p);
-
-    Token operator = peek_token(p->scanner);
-    if (operator.type == PLUS_EQUAL || operator.type == EQUAL || operator.type == MINUS_EQUAL || operator.type == STAR_EQUAL || operator.type == MINUS_EQUAL || operator.type == MOD_EQUAL)
-    {
-        next_token(p->scanner);
-        Expression *value = assignment(p);
-
-        if (expr->type == VARIABLE)
-        {
-            Token identifier = expr->Variable.identifier;
-            return construct_assignment(identifier, value, operator);
-        }
-
-        error_report(202, "SyntaxError: Line %d column %d\nInvalid assignment target", expr->span.startline, expr->span.startcol);
-    }
-
-    return expr;
-}
-
-Expression *or(Parser *p)
-{
-    Expression *expr = and(p);
-
-    while (check(p, OR))
-    {
-        Token operator = next_token(p->scanner);
-        Expression *right = and(p);
-
-        expr = construct_logical(expr, operator, right);
-    }
-
-    return expr;
-}
-
-Expression *and(Parser *p)
-{
-    Expression *expr = equality(p);
-
-    while (check(p, AND))
-    {
-        Token operator = next_token(p->scanner);
-        Expression *right = equality(p);
-
-        expr = construct_logical(expr, operator, right);
-    }
-
-    return expr;
-}
-
-Expression *equality(Parser *p)
-{
-    // printf("Performing comparison...\n");
-    Expression *expr = comparison(p);
-    Token next = peek_token(p->scanner);
-    // printf("Is the next token '=='?: %d\n", next.type == EQUAL_EQUAL);
-
-    while (next.type == EQUAL_EQUAL || next.type == NOT_EQUAL)
-    {
-        // printf("Passed equality check\n");
-        Token operator = next_token(p->scanner);
-        Expression *right = comparison(p);
-
-        expr = construct_binary(expr, operator, right);
-        next = peek_token(p->scanner);
-    }
-
-    return expr;
-}
-
-Expression *comparison(Parser *p)
-{
-    // printf("Performing term...\n");
-    Expression *expr = term(p);
-    Token next = peek_token(p->scanner);
-
-    while (next.type == GREATER || next.type == GREATER_EQUAL || next.type == LESS || next.type == LESS_EQUAL)
-    {
-        Token operator = next_token(p->scanner);
-        Expression *right = term(p);
-
-        expr = construct_binary(expr, operator, right);
-        next = peek_token(p->scanner);
-    }
-
-    return expr;
-}
-
-Expression *term(Parser *p)
-{
-    // printf("Performing factor...\n");
-    Expression *expr = factor(p);
-    Token next = peek_token(p->scanner);
-
-    while (next.type == PLUS || next.type == MINUS)
-    {
-        Token operator = next_token(p->scanner);
-        Expression *right = factor(p);
-
-        expr = construct_binary(expr, operator, right);
-        next = peek_token(p->scanner);
-    }
-
-    return expr;
-}
-
-Expression *factor(Parser *p)
-{
-    // printf("Performing unary...\n");
-    Expression *expr = unary(p);
-    Token next = peek_token(p->scanner);
-
-    while (next.type == SLASH || next.type == STAR || next.type == MOD)
-    {
-        Token operator = next_token(p->scanner);
-        Expression *right = unary(p);
-
-        expr = construct_binary(expr, operator, right);
-        next = peek_token(p->scanner);
-    }
-
-    return expr;
-}
-
-Expression *unary(Parser *p)
-{
-    Token next = peek_token(p->scanner);
-
-    if (next.type == NOT || next.type == MINUS)
-    {
-        Token operator = next_token(p->scanner);
-        Expression *right = unary(p);
-
-        next = peek_token(p->scanner);
-        return construct_unary(operator, right);
-    }
-
-    return postfix(p);
-}
-
-Expression *postfix(Parser *p)
-{
-    // printf("Performing primary...\n");
-    Expression *left = primary(p);
-
-    while (match(p, LEFT_PAREN))
-    {
-        left = finishCall(p, left);
-    }
-
-    if (check(p, PLUS_PLUS) || check(p, MINUS_MINUS))
-    {
-        Token operator = next_token(p->scanner);
-        return construct_postfix(operator, left);
-    }
-
-    return left;
-}
-
-Expression *primary(Parser *p)
-{
-    Token next = next_token(p->scanner);
-    // printf("Token info:\nLine: %d\nColumn: %d\nLexeme: %.*s\n", next.line, next.column, (int) next.len, next.lexeme);
-    // printf("Is this a number?: %d\n", next.type == INTEGER);
-    // printf("Is this '=='?: %d\n", next.type == EQUAL_EQUAL);
-    // printf("Is this '('?: %d\n\n", next.type == LEFT_PAREN);
-
-    if (next.type == FALSE)
-    {
-        Expression *expr = malloc(sizeof(Expression));
-
-        if (!expr)
-        {
-            fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(201);
-        }
-
-        expr->type = LITERAL;
-        expr->Literal.type = TYPE_FALSE;
-
-        expr->span.startline = next.line;
-        expr->span.startcol = next.column;
-
-        expr->span.endline = next.line;
-        expr->span.endcol = next.column + next.len;
-
-        return expr;
-    }
-    else if (next.type == TRUE)
-    {
-        Expression *expr = malloc(sizeof(Expression));
-
-        if (!expr)
-        {
-            fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(201);
-        }
-
-        expr->type = LITERAL;
-        expr->Literal.type = TYPE_TRUE;
-
-        expr->span.startline = next.line;
-        expr->span.startcol = next.column;
-
-        expr->span.endline = next.line;
-        expr->span.endcol = next.column + next.len;
-
-        return expr;
-    }
-    else if (next.type == NIL)
-    {
-        Expression *expr = malloc(sizeof(Expression));
-
-        if (!expr)
-        {
-            fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(201);
-        }
-
-        expr->type = LITERAL;
-        expr->Literal.type = TYPE_NIL;
-
-        expr->span.startline = next.line;
-        expr->span.startcol = next.column;
-
-        expr->span.endline = next.line;
-        expr->span.endcol = next.column + next.len;
-
-        return expr;
-    }
-    else if (next.type == INTEGER)
-    {
-        Expression *expr = malloc(sizeof(Expression));
-
-        if (!expr)
-        {
-            fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(201);
-        }
-
-        expr->type = LITERAL;
-
-        expr->Literal.type = TYPE_INTEGER;
-
-        char buf[next.len + 1];
-        memcpy(buf, next.lexeme, next.len);
-        buf[next.len] = '\0';
-
-        long long value = strtoll(buf, NULL, 10);
-
-        expr->Literal.Value.int_value = value;
-
-        expr->span.startline = next.line;
-        expr->span.startcol = next.column;
-
-        expr->span.endline = next.line;
-        expr->span.endcol = next.column + next.len;
-
-        return expr;
-    }
-    else if (next.type == FLOAT)
-    {
-        Expression *expr = malloc(sizeof(Expression));
-
-        if (!expr)
-        {
-            fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(201);
-        }
-
-        expr->type = LITERAL;
-
-        expr->Literal.type = TYPE_FLOAT;
-
-        char *buf = malloc(next.len + 1);
-        memcpy(buf, next.lexeme, next.len);
-        buf[next.len] = '\0';
-
-        double value = strtod(buf, NULL);
-        free(buf);
-
-        expr->Literal.Value.float_value = value;
-
-        expr->span.startline = next.line;
-        expr->span.startcol = next.column;
-
-        expr->span.endline = next.line;
-        expr->span.endcol = next.column + next.len;
-
-        return expr;
-    }
-    else if (next.type == STRING)
-    {
-        Expression *expr = malloc(sizeof(Expression));
-
-        if (!expr)
-        {
-            fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(201);
-        }
-
-        expr->type = LITERAL;
-
-        expr->Literal.type = TYPE_STRING;
-        expr->Literal.Value.len = next.len;
-        expr->Literal.Value.lexeme = next.lexeme;
-
-        expr->span.startline = next.line;
-        expr->span.startcol = next.column - 1;
-
-        expr->span.endline = next.line;
-        expr->span.endcol = next.column + next.len + 1;
-
-        return expr;
-    }
-    else if (next.type == IDENTIFIER)
-    {
-        Expression *expr = malloc(sizeof(Expression));
-
-        if (!expr)
-        {
-            fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-            exit(201);
-        }
-
-        expr->type = VARIABLE;
-        expr->Variable.identifier = next;
-
-        return expr;
-    }
-    else if (next.type == LEFT_PAREN)
-    {
-        // printf("Reached left paren\n");
-        Expression *expr = expression(p);
-        int startline = next.line;
-        int startcol = next.column;
-        // printf("Expression Details\nLeft:%c\nRight:%c\n", expr->Binary.Left, expr->Binary.Right);
-        // printf("%.*s\n", (int) peek_token(p->scanner).len, peek_token(p->scanner).lexeme);
-        if (peek_token(p->scanner).type == RIGHT_PAREN)
-        {
-            Token paren = next_token(p->scanner);
-            Expression *grouping = malloc(sizeof(Expression));
-
-            if (!grouping)
-            {
-                fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-                exit(201);
-            }
-
-            grouping->type = GROUPING;
-            grouping->Grouping.Expr = expr;
-
-            grouping->span.startline = startline;
-            grouping->span.startcol = startcol;
-
-            grouping->span.endline = paren.line;
-            grouping->span.endcol = paren.column + 1;
-
-            return grouping;
-        }
-        else
-        {
-            Token got = peek_token(p->scanner);
-            /// printf("Token info:\nLine: %d\nColumn: %d\nLexeme: %s\n", got.line, got.column, got.lexeme);
-            fprintf(stderr, "SyntaxError: Line %d column %d\nExpected ')' to close expression, got '%.*s'\n", got.line, got.column, (int)got.len, got.lexeme);
-            exit(202);
-        }
-    }
-    else if (next.type == TOKEN_EOF)
-    {
-        fprintf(stderr, "SyntaxError: Line %d column %d\nExpected expression, got <EOF>\n", p->scanner->line, p->scanner->column);
-        exit(202);
-    }
-    else if (next.type == TOKEN_ERROR)
-        error_report(next.code, "%.*s\n", next.len, next.lexeme);
-
-    fprintf(stderr, "SyntaxError: Line %d column %d\nExpected an expression, got '%.*s'\n", next.line, next.column, (int)next.len, next.lexeme);
-    exit(202);
 }

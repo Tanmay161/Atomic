@@ -18,17 +18,17 @@ static void printValue(Value value) {
 VM *initVM() {
     VM *vm = malloc(sizeof(VM));
     if (!vm) 
-        error_report(400, "MemoryError: Unable to allocate memory for virtual machine");
+        error_report(500, "MemoryError: Unable to allocate memory for virtual machine");
     
     vm->chunk = NULL;
 
     ValueStack *stack = malloc(sizeof(ValueStack));
     if (!stack) 
-        error_report(400, "MemoryError: Unable to allocate memory for value stack");
+        error_report(500, "MemoryError: Unable to allocate memory for value stack");
     
     Value *values = malloc(sizeof(Value) * 64);
     if (!values) 
-        error_report(400, "MemoryError: Unable to allocate memory for value stack");
+        error_report(500, "MemoryError: Unable to allocate memory for value stack");
 
     vm->stack = stack;
     vm->stack->values = values;
@@ -46,6 +46,7 @@ void freeVM(VM *vm) {
 }
 
 static InterpretResult run(VM *vm) {
+    
 #define READ_BYTE(vm) (*vm->ip++)
 #define READ_U16(vm) \
     ((uint16_t) READ_BYTE(vm)) | \
@@ -137,7 +138,7 @@ void push(VM *vm, Value value) {
 
         Value* temp = realloc(vm->stack->values, sizeof(Value) * vm->stack->capacity);
         if (!temp)
-            error_report(400, "MemoryError: Unable to allocate memory for value stack");
+            error_report(500, "MemoryError: Unable to allocate memory for value stack");
         
         vm->stack->values = temp;
         vm->stackTop = &vm->stack->values[count];
