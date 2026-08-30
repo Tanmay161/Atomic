@@ -2,16 +2,17 @@
 
 #include "ast.h"
 #include "chunk.h"
+#include "vm.h"
 
 typedef struct {
     Program *source;
-    SourceSpan currentSpan;
     Chunk *currentChunk;
+    VM *vm;
 } Compiler;
 
-Compiler *init_compiler(Program *source);
+Compiler *init_compiler(VM *vm, Program *source);
 void free_compiler(Compiler *compiler);
 
-int compile(Compiler *compiler, Program *source);
+Chunk *compile(Compiler *compiler);
 
 #endif

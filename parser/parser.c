@@ -7,7 +7,7 @@
 #include "parser.h"
 #include "token.h"
 #include "ast.h"
-#include "shared.h"
+#include "error.h"
 
 /* ===== Error Codes =====
     200: Unable to allocate memory for parser
@@ -16,7 +16,7 @@
 */
 
 // Parser constructor
-Parser *init_parser(char *file_name);
+Parser *init_parser(Scanner *s);
 
 // Main parsing function
 Program *parse(Parser *p);
@@ -241,8 +241,8 @@ static Expression *parse_string(Parser *p, Expression *left) {
     expr->type = LITERAL;
 
     expr->Literal.type = TYPE_STRING;
-    expr->Literal.Value.len = next.len;
     expr->Literal.Value.lexeme = next.lexeme;
+    expr->Literal.string_len = next.len;
 
     expr->span.startline = next.line;
     expr->span.startcol = next.column - 1;
@@ -350,7 +350,8 @@ static inline ParseRule *getRule(TokenType type) {
     return &rules[type];
 }
 
-int main()
+// Debugging
+/*int main()
 {
     Parser *p = init_parser("./parser/test.txt");
     Program *program = parse(p);
@@ -585,7 +586,7 @@ void output_expression(Expression *expr)
         break;
     }
     }
-}
+} */
 
 int check(Parser *p, TokenType type)
 {
@@ -613,10 +614,8 @@ Token consume(Parser *p, TokenType type, const char *message, int errorCode)
     return next_token(p->scanner);
 }
 
-Parser *init_parser(char *file_name)
+Parser *init_parser(Scanner *s)
 {
-    Scanner *s = init_scanner(file_name);
-
     Parser *parser = malloc(sizeof(Parser));
 
     if (!parser)

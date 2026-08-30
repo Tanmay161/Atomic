@@ -1,5 +1,5 @@
-#ifndef shared_h
-#define shared_h
+#ifndef error_h
+#define error_h
 
 void error_report(int exitCode, const char *message, ...);
 

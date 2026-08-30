@@ -1,24 +1,24 @@
 #ifndef STRINGPOOL_H
-
 #define STRINGPOOL_H
+
 #include <stdlib.h>
 #include <stdint.h>
 
-typedef struct Node {
-    char *string;
-    struct Node *next;
+typedef struct  {
     uint32_t hash;
-    size_t len;
+    char *lexeme;
+    int len;
 } Node;
 
 typedef struct {
-    Node **buckets;
-    int items;
+    Node *buckets;
+    size_t items;
     size_t capacity;
 } Pool;
 
 extern Pool *string_pool;
+
 void init_string_pool();
-char *insert_return_ptr_to_string(char *string, size_t len);
+char *insert_return_ptr_to_string(const char *key, int len);
 
 #endif

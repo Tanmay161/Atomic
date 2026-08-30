@@ -1,15 +1,7 @@
 #ifndef token_h
 #define token_h
 
-typedef struct
-{
-    char *stream;
-    char *start;
-    char *pos;
-    int line;
-    int column;
-    FILE *input;
-} Scanner;
+#include <stddef.h>
 
 typedef enum
 {
@@ -83,7 +75,7 @@ typedef struct
 {
     TokenType type;
     char *lexeme;
-    size_t len;
+    int len;
     int line;
     int column;
 

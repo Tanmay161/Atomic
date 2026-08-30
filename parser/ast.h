@@ -185,8 +185,9 @@ typedef struct Expression {
                 long long int_value;
                 double float_value;
                 char *lexeme;
-                size_t len;
             } Value;
+            
+            int string_len;
         } Literal;
 
         // Errors

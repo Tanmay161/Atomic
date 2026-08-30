@@ -31,7 +31,7 @@ typedef struct {
     Precedence precedence;
 } ParseRule;
 
-Parser *init_parser(char *file_name);
+Parser *init_parser(Scanner *s);
 Program *parse(Parser *p);
 
 #endif

@@ -28,6 +28,33 @@ void freeValueArray(ValueArray *array) {
     initValueArray(array);
 }
 
+void fprintObject(FILE *output, Value value) {
+    switch (value.obj->type) {
+        case OBJ_STRING: {
+            ObjString *string = (ObjString *) value.obj;
+            fprintf(output, "%.*s", string->len, string->lexeme);
+            break;
+        }
+    }
+}
+
 void fprintValue(FILE *output, Value value) {
-    fprintf(output, "%g", value);
+    switch (value.type) {
+        case VAL_INT: 
+            fprintf(output, "%lld", value.int_val);
+            break;
+        case VAL_FLOAT:
+            fprintf(output, "%g", value.float_val);
+            break;
+        case VAL_NIL:
+            fprintf(output, "NIL");
+            break;
+        case VAL_BOOL:
+            if (value.bool_val == 1) fprintf(output, "TRUE"); 
+            else fprintf(output, "FALSE");
+            break;
+        case VAL_OBJ:
+            fprintObject(output, value);
+            break;
+    }
 }

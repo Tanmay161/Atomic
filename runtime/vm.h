@@ -4,6 +4,8 @@
 #include "chunk.h"
 #include "value.h"
 
+typedef struct Obj Obj;
+
 typedef enum {
     INTERPRET_OK,
     INTERPRET_COMPILE_ERROR,
@@ -15,11 +17,12 @@ typedef struct {
     int capacity;
 } ValueStack;
 
-typedef struct {
+typedef struct VM {
     Chunk *chunk;
     uint8_t* ip;
     ValueStack *stack;
     Value *stackTop;
+    Obj *objs;
 } VM;
 
 VM *initVM();

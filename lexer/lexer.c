@@ -66,19 +66,20 @@ Token reportError(int exitCode, int line, int column, const char *message, ...)
     int length = vsnprintf(buffer, sizeof(buffer), message, args1);
     va_end(args1);
 
+    char *final;
+    int final_len;
     // Buffer too small
-    char *interned;
     if (length >= 512)
     {
         char *heapBuffer = malloc(length + 1);
         int length2 = vsnprintf(heapBuffer, length + 1, message, args2);
-        interned = insert_return_ptr_to_string(heapBuffer, length2);
-
-        free(heapBuffer);
+        final = heapBuffer;
+        final_len = length2;
     }
     else
     {
-        interned = insert_return_ptr_to_string(buffer, length);
+        final = buffer;
+        final_len = length;
     }
 
     va_end(args2);
@@ -86,8 +87,8 @@ Token reportError(int exitCode, int line, int column, const char *message, ...)
     return (Token){
         .type = TOKEN_ERROR,
         .code = exitCode,
-        .len = length,
-        .lexeme = interned,
+        .len = final_len,
+        .lexeme = final,
         .line = line,
         .column = column};
 }
@@ -192,10 +193,11 @@ Token scan_number(Scanner *s)
                     107,
                     s->line,
                     start_col,
-                    "SyntaxError: Line %d column %d\nInvalid float: '%s' (Unexpected dot)",
+                    "SyntaxError: Line %d column %d\nInvalid float: '%.*s' (Unexpected dot)",
                     s->line,
                     start_col,
-                    insert_return_ptr_to_string(start, s->pos - start));
+                    s->pos - start,
+                    start);
 
                 while (*s->pos != '\n')
                 {
@@ -275,7 +277,7 @@ Token scan_identifier(Scanner *s)
     }
 
     // Keyword check
-    size_t len = (size_t)(s->pos - start);
+    int len = s->pos - start;
     switch (start[0])
     {
     case 'i':
@@ -369,7 +371,7 @@ Token scan_identifier(Scanner *s)
 
     return (Token){
         .type = IDENTIFIER,
-        .lexeme = insert_return_ptr_to_string(start, len),
+        .lexeme = start,
         .line = s->line,
         .column = start_col,
         .len = len};
@@ -381,10 +383,10 @@ Token scan_string(Scanner *s)
     // We don't go back to the previously consumed character as that is a quote.
     int multiline = 0;
     int start_line = s->line;
-    int start_col = s->column - 1;
+    int start_col = s->column;
 
     size_t size = 32;
-    size_t len = 0;
+    int len = 0;
     char *string = malloc(size);
 
     if (!string)
@@ -420,12 +422,12 @@ Token scan_string(Scanner *s)
                         106,
                         start_line,
                         start_col,
-                        "SyntaxError: Line %d column %d\nUnclosed string:\n%s (Expected \"\"\")",
+                        "SyntaxError: Line %d column %d\nUnclosed string:\n%.*s (Expected \"\"\")",
                         start_line,
                         start_col,
-                        insert_return_ptr_to_string(string, len));
+                        len,
+                        string);
 
-                    free(string);
                     return returnError;
                 }
 
@@ -468,12 +470,12 @@ Token scan_string(Scanner *s)
                     106,
                     start_line,
                     s->column,
-                    "SyntaxError: Line %d column %d\nUnclosed string:\n%s (Expected \"\"\")",
+                    "SyntaxError: Line %d column %d\nUnclosed string:\n%.*s (Expected \"\"\")",
                     start_line,
                     s->column,
-                    insert_return_ptr_to_string(string, len));
+                    len,
+                    string);
 
-                free(string);
                 return returnError;
             }
             else
@@ -482,12 +484,12 @@ Token scan_string(Scanner *s)
                     106,
                     s->line,
                     start_col,
-                    "SyntaxError: Line %d column %d\nUnclosed string:\n%s (Expected \")",
+                    "SyntaxError: Line %d column %d\nUnclosed string:\n%.*s (Expected \")",
                     s->line,
                     start_col,
-                    insert_return_ptr_to_string(string, len));
+                    len,
+                    string);
 
-                free(string);
                 return returnError;
             }
         }
@@ -536,12 +538,12 @@ Token scan_string(Scanner *s)
                         106,
                         s->line,
                         start_col,
-                        "SyntaxError: Line %d column %d\nUnclosed string:\n%s (Expected \")",
+                        "SyntaxError: Line %d column %d\nUnclosed string:\n%.*s (Expected \")",
                         s->line,
                         start_col,
-                        insert_return_ptr_to_string(string, len));
+                        len,
+                        string);
 
-                    free(string);
                     return returnError;
                 }
                 else
@@ -550,12 +552,12 @@ Token scan_string(Scanner *s)
                         106,
                         s->line,
                         start_col,
-                        "SyntaxError: Line %d column %d\nUnclosed string:\n%s (Expected \"\"\")",
+                        "SyntaxError: Line %d column %d\nUnclosed string:\n%.*s (Expected \"\"\")",
                         s->line,
                         start_col,
-                        insert_return_ptr_to_string(string, len));
+                        len,
+                        string);
 
-                    free(string);
                     return returnError;
                 }
                 break;
@@ -605,12 +607,10 @@ Token scan_string(Scanner *s)
     }
 
     string[len] = '\0';
-    char *interned = insert_return_ptr_to_string(string, len);
-    free(string);
 
     return (Token){
         .type = STRING,
-        .lexeme = interned,
+        .lexeme = string,
         .line = s->line,
         .column = start_col,
         .len = len};
