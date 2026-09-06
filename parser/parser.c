@@ -23,7 +23,6 @@ Program *parse(Parser *p);
 
 // === Helpers ===
 Expression *construct_binary(Expression *left, Token operator, Expression *right);
-Expression *construct_logical(Expression *left, Token operator, Expression *right);
 Expression *construct_unary(Token operator, Expression *right);
 Expression *construct_postfix(Token operator, Expression *left);
 Expression *construct_assignment(Token identifier, Expression *value, Token operator);
@@ -643,30 +642,6 @@ Expression *construct_binary(Expression *left, Token operator, Expression *right
     expression->Binary.Operator = operator;
     expression->Binary.Right = right;
 
-    expression->inferred = TYPE_UNKNOWN;
-
-    expression->span.startline = left->span.startline;
-    expression->span.startcol = left->span.startcol;
-    expression->span.endline = right->span.endline;
-    expression->span.endcol = right->span.endcol;
-
-    return expression;
-}
-
-Expression *construct_logical(Expression *left, Token operator, Expression *right)
-{
-    Expression *expression = malloc(sizeof(Expression));
-    if (!expression)
-    {
-        fprintf(stderr, "MemoryError: Failed to allocate memory for AST node.\n");
-        exit(201);
-    }
-
-    expression->type = LOGICAL;
-    expression->Logical.Left = left;
-    expression->Logical.Operator = operator;
-    expression->Logical.Right = right;
-        
     expression->inferred = TYPE_UNKNOWN;
 
     expression->span.startline = left->span.startline;

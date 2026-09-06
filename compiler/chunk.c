@@ -26,8 +26,6 @@ void writeChunk(Chunk* chunk, uint8_t byte, SourceSpan span) {
 
     chunk->code[chunk->count] = byte;
     chunk->spans[chunk->count++] = span;
-
-    printf("%d\n", chunk->count);
 }
 
 int addConstant(Chunk *chunk, Value value) {

@@ -211,14 +211,6 @@ typedef struct Expression {
             Token operator;
         } Assignment;
 
-        // Logical struct
-        // Ex: x and y, x or (y and z)
-        struct {
-            Expression *Left;
-            Token Operator;
-            Expression *Right;
-        } Logical;
-
         struct {
             Expression *callee;
             Expression **arguments;

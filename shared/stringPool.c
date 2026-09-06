@@ -10,21 +10,22 @@
 #define INITIAL_CAPACITY 16
 #define LOAD_FACTOR 0.75
 
-Pool pool = (Pool){
-    .items = 0,
-    .capacity = INITIAL_CAPACITY,
-    .buckets = NULL};
+static Node *constructBuckets(size_t capacity);
 
-Pool *string_pool = &pool;
+Pool initPool() {
+    Pool pool = {.items = 0, .capacity = INITIAL_CAPACITY};
+    pool.buckets = constructBuckets(INITIAL_CAPACITY);
 
-static uint32_t compute_hash(const void *string, int len)
+    return pool;
+}
+
+static uint32_t compute_hash(const char *string, int len)
 {
     uint32_t hash = 2166136261u;
-    const uint8_t *bytes = string;
 
     for (int i = 0; i < len; i++)
     {
-        hash ^= bytes[i];
+        hash ^= string[i];
         hash *= 16777619;
     }
 
@@ -39,12 +40,6 @@ static Node *constructBuckets(size_t capacity)
         error_report(1, "MemoryError: Failed to initialize buckets for intern table");
 
     return buckets;
-}
-
-void init_string_pool()
-{
-    Node *buckets = constructBuckets(string_pool->capacity);
-    string_pool->buckets = buckets;
 }
 
 static char *copyString(const char *key, int len)
@@ -77,15 +72,13 @@ static Node *findBucket(Node *buckets, int capacity, const char *key, int len, u
     }
 }
 
-static void adjustBuckets(int capacity)
+static void adjustBuckets(Pool *pool, int capacity)
 {
-    Node *buckets = calloc(capacity, sizeof(Node));
-    if (!buckets)
-        error_report(1, "MemoryError: Failed to allocate memory for intern table");
+    Node *buckets = constructBuckets(capacity);
 
-    for (int i = 0; i < string_pool->capacity; i++)
+    for (int i = 0; i < pool->capacity; i++)
     {
-        Node *bucket = &string_pool->buckets[i];
+        Node *bucket = &pool->buckets[i];
         if (bucket->lexeme == NULL)
             continue;
 
@@ -94,21 +87,21 @@ static void adjustBuckets(int capacity)
         new_bucket->lexeme = bucket->lexeme;
     }
 
-    FREE_ARRAY(Node, string_pool->buckets, string_pool->capacity);
-    string_pool->buckets = buckets;
-    string_pool->capacity = capacity;
+    FREE_ARRAY(Node, pool->buckets, pool->capacity);
+    pool->buckets = buckets;
+    pool->capacity = capacity;
 }
 
-char *insert_return_ptr_to_string(const char *key, int len)
+char *insert_return_ptr_to_string(Pool *pool, const char *key, int len)
 {
-    if (string_pool->items + 1 > string_pool->capacity * LOAD_FACTOR)
+    if (pool->items + 1 > pool->capacity * LOAD_FACTOR)
     {
-        int capacity = GROW_CAPACITY(string_pool->capacity);
-        adjustBuckets(capacity);
+        int capacity = GROW_CAPACITY(pool->capacity);
+        adjustBuckets(pool, capacity);
     }
 
     uint32_t hash = compute_hash(key, len);
-    Node *bucket = findBucket(string_pool->buckets, string_pool->capacity, key, len, hash);
+    Node *bucket = findBucket(pool->buckets, pool->capacity, key, len, hash);
 
     if (bucket->lexeme == NULL)
     {
@@ -116,11 +109,20 @@ char *insert_return_ptr_to_string(const char *key, int len)
         bucket->len = len;
         bucket->hash = hash;
 
-        string_pool->items++;
+        pool->items++;
         return bucket->lexeme;
     }
     else
     {
         return bucket->lexeme;
     }
+}
+
+void free_pool(Pool *pool) {
+    for (int i = 0; i < pool->capacity; i++) {  
+        if (pool->buckets[i].lexeme == NULL) continue;
+        free(pool->buckets[i].lexeme);
+    }
+
+    free(pool->buckets);
 }

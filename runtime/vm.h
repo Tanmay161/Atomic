@@ -3,6 +3,8 @@
 
 #include "chunk.h"
 #include "value.h"
+#include "stringPool.h"
+#include "hashmap.h"
 
 typedef struct Obj Obj;
 
@@ -23,6 +25,8 @@ typedef struct VM {
     ValueStack *stack;
     Value *stackTop;
     Obj *objs;
+    Pool strings;
+    Map globals;
 } VM;
 
 VM *initVM();

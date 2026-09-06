@@ -36,7 +36,6 @@ Token next_token(Scanner *s);
 
 Scanner *init_scanner(char *inputFile)
 {
-    init_string_pool();
     Scanner *scanner = malloc(sizeof(Scanner));
 
     if (!scanner)
@@ -416,7 +415,7 @@ Token scan_string(Scanner *s)
             else
             {
                 // If the file ends before string closes, because if file ends then s->pos + 1 will be invalid.
-                if (peek(s) == '\0' || s->pos[1] == '\0')
+                if (s->pos[0] == '\0' || s->pos[1] == '\0')
                 {
                     Token returnError = reportError(
                         106,
@@ -442,7 +441,7 @@ Token scan_string(Scanner *s)
                 else
                 {
                     // Reallocate more memory if required
-                    if (len + 1 >= size)
+                    if (len >= size)
                     {
                         size *= 2;
                         char *temp = realloc(string, size);
@@ -463,7 +462,6 @@ Token scan_string(Scanner *s)
         // End of string without closing
         else if (c == '\0')
         {
-            string[len] = '\0';
             if (multiline == 1)
             {
                 Token returnError = reportError(
@@ -605,8 +603,6 @@ Token scan_string(Scanner *s)
 
         string[len++] = c;
     }
-
-    string[len] = '\0';
 
     return (Token){
         .type = STRING,

@@ -6,11 +6,11 @@
 #include "object.h"
 
 typedef enum {
+    VAL_NIL,
     VAL_INT,
     VAL_FLOAT,
     VAL_OBJ,
     VAL_BOOL,
-    VAL_NIL,
 } ValueType;
 
 typedef struct {

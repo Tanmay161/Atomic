@@ -6,6 +6,10 @@
 #include "error.h"
 #include "chunk.h"
 
+static int simpleInstruction(const char *name, FILE *output, int offset);
+static int constantInstruction(Chunk *chunk, const char *name, FILE *output, int offset);
+static int globalDef(Chunk *chunk, FILE *output, int offset);
+
 void disassembleChunk(Chunk *chunk)
 {
     FILE *output = fopen("./compiler/result.abc", "w");
@@ -32,7 +36,7 @@ int disassembleInstruction(Chunk *chunk, FILE *output, int offset)
     case OP_RETURN:
         return simpleInstruction("OP_RETURN", output, offset);
     case OP_CONSTANT:
-        return constantInstruction("OP_CONSTANT", chunk, output, offset);
+        return constantInstruction(chunk, "OP_CONSTANT", output, offset);
     case OP_NEGATE:
         return simpleInstruction("OP_NEGATE", output, offset);
     case OP_ADD:
@@ -63,6 +67,18 @@ int disassembleInstruction(Chunk *chunk, FILE *output, int offset)
         return simpleInstruction("OP_GREATER", output, offset);
     case OP_GREATER_EQUAL:
         return simpleInstruction("OP_GREATER_EQUAL", output, offset);
+    case OP_POP:
+        return simpleInstruction("OP_POP", output, offset);
+    case OP_DEFINE_GLOBAL:
+        return constantInstruction(chunk, "OP_DEFINE_GLOBAL", output, offset);
+    case OP_GET_GLOBAL:
+        return constantInstruction(chunk, "OP_GET_GLOBAL", output, offset);
+    case OP_SET_GLOBAL:
+        return constantInstruction(chunk, "OP_SET_GLOBAL", output, offset);
+    case OP_AND:
+        return simpleInstruction("OP_AND", output, offset);
+    case OP_OR:
+        return simpleInstruction("OP_OR", output, offset);
     default:
     {
         printf("Unknown opcode: %d\n", instruction);
@@ -77,7 +93,7 @@ static int simpleInstruction(const char *name, FILE *output, int offset)
     return offset + 1;
 }
 
-static int constantInstruction(const char *name, Chunk *chunk, FILE *output, int offset)
+static int constantInstruction(Chunk *chunk, const char *name, FILE *output, int offset)
 {
     uint8_t low = chunk->code[offset + 1];
     uint8_t high = chunk->code[offset + 2];
@@ -85,9 +101,9 @@ static int constantInstruction(const char *name, Chunk *chunk, FILE *output, int
     uint16_t index = readU16(low, high);
 
     // fprintf(output, "%-16s %4d '", name, index);
-    fprintf(output, "OP_CONSTANT %d '", index);
-    fprintValue(output, chunk->constants.values[index]);
-    fprintf(output, "'\n");
+    fprintf(output, "%s %d \n", name, index);
+    //fprintValue(output, chunk->constants.values[index]);
+    //fprintf(output, "'\n");
 
     return offset + 3;
 }

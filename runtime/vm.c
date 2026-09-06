@@ -11,6 +11,8 @@
 #include "ast.h"
 #include "stringPool.h"
 #include "object.h"
+#include "stringPool.h"
+#include "hashmap.h"
 
 #define STRING_CONCAT_MAX_STACK_LIMIT 4096
 
@@ -46,7 +48,7 @@ static void printObject(Value value)
     case OBJ_STRING:
     {
         ObjString *string = AS_STRING(value);
-        printf("%.*s", string->len, string->lexeme);
+        printf("String: '%.*s'", string->len, string->lexeme);
     }
     }
 }
@@ -109,32 +111,34 @@ static int valuesEqual(Value a, Value b)
     }
 }
 
-static void concatenate(VM *vm) {
+static void concatenate(VM *vm)
+{
     ObjString *b = AS_STRING(pop(vm));
     ObjString *a = AS_STRING(pop(vm));
-    
+
     int final_len = a->len + b->len;
 
     ObjString *final;
-    if (final_len <= STRING_CONCAT_MAX_STACK_LIMIT) {
+    if (final_len <= STRING_CONCAT_MAX_STACK_LIMIT)
+    {
         char concat[final_len];
 
         memcpy(concat, a->lexeme, a->len);
         memcpy(concat + a->len, b->lexeme, b->len);
         final = allocateString(vm, concat, final_len);
-    } 
-    else {
+    }
+    else
+    {
         char *concat = malloc(final_len);
         if (!concat)
             error_report(501, "MemoryError: Unable to allocate memory for string");
-    
+
         memcpy(concat, a->lexeme, a->len);
         memcpy(concat + a->len, b->lexeme, b->len);
 
         final = allocateString(vm, concat, final_len);
         free(concat);
     }
-
 
     push(vm, OBJ_VAL(final));
 }
@@ -162,12 +166,15 @@ VM *initVM()
     vm->stack->capacity = 64;
     vm->objs = NULL;
 
+    vm->strings = initPool();
+    vm->globals = initMap();
+
     return vm;
 }
 
 static InterpretResult run(VM *vm)
 {
-    printf("VM initiate run...\n");
+    printf("VM initiate run...\n\n");
 #define READ_BYTE(vm) (*vm->ip++)
 #define READ_U16(vm)            \
     ((uint16_t)READ_BYTE(vm)) | \
@@ -175,15 +182,17 @@ static InterpretResult run(VM *vm)
 #define READ_CONSTANT(vm) (vm->chunk->constants.values[READ_U16(vm)])
 #define GET_INDEX(vm) (vm->ip - vm->chunk->code - 1)
 
+#define READ_STRING(vm) AS_STRING(READ_CONSTANT(vm))
+
 #define BINARY_OP(vm, op)                                                                                                                           \
     do                                                                                                                                              \
     {                                                                                                                                               \
         Value b = pop(vm);                                                                                                                          \
         Value a = pop(vm);                                                                                                                          \
+        SourceSpan span = vm->chunk->spans[GET_INDEX(vm)];                                                                                          \
                                                                                                                                                     \
         if (!IS_NUMERIC(a) || !IS_NUMERIC(b))                                                                                                       \
         {                                                                                                                                           \
-            SourceSpan span = vm->chunk->spans[GET_INDEX(vm)];                                                                                      \
             printf("RuntimeError: Line %d column %d\nOperands of operator '%s' must be numeric, instead got ", span.startline, span.startcol, #op); \
             printValue(a);                                                                                                                          \
             printf(" and ");                                                                                                                        \
@@ -196,7 +205,7 @@ static InterpretResult run(VM *vm)
             double val_a = (a.type == VAL_FLOAT) ? a.float_val : (double)a.int_val;                                                                 \
             double val_b = (b.type == VAL_FLOAT) ? b.float_val : (double)b.int_val;                                                                 \
                                                                                                                                                     \
-            if (#op[0] == '>' || #op[0] == '<' || (#op[0] == '>' && #op[1] == '=') || (#op[0] == '<' && #op[1] == '='))                             \
+            if (#op[0] == '>' || #op[0] == '<')                                                                                                     \
             {                                                                                                                                       \
                 push(vm, BOOL_VAL(val_a op val_b));                                                                                                 \
                 break;                                                                                                                              \
@@ -212,6 +221,12 @@ static InterpretResult run(VM *vm)
                 push(vm, BOOL_VAL(a.int_val op b.int_val));                                                                                         \
                 break;                                                                                                                              \
             }                                                                                                                                       \
+            else if (#op[0] == '/')                                                                                                                 \
+            {                                                                                                                                       \
+                if (b.int_val == 0)                                                                                                                 \
+                    error_report(504, "RuntimeError: Line %d column %d\nDivision by 0", span.startline, span.startcol);                             \
+                push(vm, (Value){.type = VAL_FLOAT, .float_val = (double)a.int_val op(double) b.int_val});                                          \
+            }                                                                                                                                       \
             else                                                                                                                                    \
                 push(vm, (Value){.type = VAL_INT, .int_val = a.int_val op b.int_val});                                                              \
         }                                                                                                                                           \
@@ -221,6 +236,9 @@ static InterpretResult run(VM *vm)
     { // can be replaced with while (1)
 #ifdef DEBUG_TRACE_EXECUTION
         printf("       ");
+
+        if (GET_COUNT(vm) == 0)
+            printf("[]");
 
         for (Value *slot = vm->stack->values; slot < vm->stackTop; slot++)
         {
@@ -238,6 +256,37 @@ static InterpretResult run(VM *vm)
 
         switch (instruction)
         {
+        case OP_DEFINE_GLOBAL:
+        {
+            ObjString *name = READ_STRING(vm);
+            map_set(&vm->globals, name->lexeme, name->len, vm->stackTop[-1]);
+            pop(vm);
+            break;
+        }
+        case OP_GET_GLOBAL:
+        {
+            ObjString *name = READ_STRING(vm);
+            Value *val = map_get(&vm->globals, name->lexeme, name->len);
+
+            if (!val)
+            {
+                error_report(502, "RuntimeError: Line %d column %d\nUndefined variable '%.*s'", span.startline, span.startcol, name->len, name->lexeme);
+            }
+
+            push(vm, *val);
+            break;
+        }
+        case OP_SET_GLOBAL:
+        {
+            ObjString *name = READ_STRING(vm);
+
+            if (map_set(&vm->globals, name->lexeme, name->len, vm->stackTop[-1]))
+            {
+                map_remove(&vm->globals, name->lexeme, name->len);
+                error_report(502, "RuntimeError: Line %d column %d\nUndefined variable '%.*s'", span.startline, span.startcol, name->len, name->lexeme);
+            }
+            break;
+        }
         case OP_NEGATE:
         {
             Value top = vm->stackTop[-1];
@@ -263,13 +312,14 @@ static InterpretResult run(VM *vm)
             vm->stackTop[-1] = BOOL_VAL(IS_FALSEY(vm->stackTop[-1]));
             break;
 
-        case OP_ADD: {
+        case OP_ADD:
+        {
             Value b = vm->stackTop[-1];
             Value a = vm->stackTop[-2];
 
             if (IS_STRING(a) && IS_STRING(b))
                 concatenate(vm);
-            else 
+            else
                 BINARY_OP(vm, +);
             break;
         }
@@ -345,6 +395,10 @@ static InterpretResult run(VM *vm)
             break;
         }
 
+        case OP_POP:
+            pop(vm);
+            break;
+
         case OP_RETURN:
         {
             printValue(pop(vm));
@@ -359,6 +413,7 @@ static InterpretResult run(VM *vm)
 #undef READ_CONSTANT
 #undef GET_INDEX
 #undef BINARY_OP
+#undef READ_STRING
 }
 
 InterpretResult interpret(VM *vm, Chunk *chunk)
@@ -397,30 +452,40 @@ Value pop(VM *vm)
     return *--vm->stackTop;
 }
 
-static void freeObj(Obj *obj) {
-    switch (obj->type) {
-        case OBJ_STRING: {
-            ObjString *string = (ObjString *) obj;
-            free(string);
-            break;
-        }
+static void freeObj(Obj *obj)
+{
+    switch (obj->type)
+    {
+    case OBJ_STRING:
+    {
+        ObjString *string = (ObjString *)obj;
+        free(string);
+        break;
+    }
     }
 }
 
-static void freeObjs(VM *vm) {
+static void freeObjs(VM *vm)
+{
     Obj *object = vm->objs;
-    while (object->next != NULL) {
+    if (object == NULL) return;
+
+    while (object->next != NULL)
+    {
         Obj *next = object->next;
-        
-        FREE(object, Obj);
+
+        FREE(Obj, object);
         object = next;
     }
 }
 
-void freeVM(VM *vm) {
+void freeVM(VM *vm)
+{
     freeObjs(vm);
     free(vm->stack->values);
     free(vm->stack);
+    free_pool(&vm->strings);
+    free_map(&vm->globals);
 
     free(vm);
 }
