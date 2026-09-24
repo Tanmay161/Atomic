@@ -25,11 +25,16 @@ typedef enum {
     OP_LESS,
     OP_LESS_EQUAL,
     OP_POP,
+    OP_POPN,
     OP_DEFINE_GLOBAL,
     OP_GET_GLOBAL,
     OP_SET_GLOBAL,
-    OP_AND,
-    OP_OR,
+    OP_GET_LOCAL,
+    OP_SET_LOCAL,
+    OP_JUMP_IF_FALSE,
+    OP_JUMP_IF_TRUE,
+    OP_JUMP,
+    OP_LOOP,
 } OpCode;
 
 typedef struct {

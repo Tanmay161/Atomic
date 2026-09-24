@@ -4,7 +4,17 @@
 #include "chunk.h"
 #include "vm.h"
 
+#define UINT16_COUNT (UINT16_MAX + 1)
+
 typedef struct {
+    Token name;
+    int depth;
+} Local;
+
+typedef struct {
+    Local locals[UINT16_COUNT];
+    int localCount;
+    int scopeDepth;
     Program *source;
     Chunk *currentChunk;
     VM *vm;

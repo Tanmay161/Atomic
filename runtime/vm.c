@@ -287,6 +287,43 @@ static InterpretResult run(VM *vm)
             }
             break;
         }
+        case OP_GET_LOCAL:
+        {
+            uint16_t slot = READ_U16(vm);
+            push(vm, vm->stack->values[slot]);
+            break;
+        }
+        case OP_SET_LOCAL:
+        {
+            uint16_t slot = READ_U16(vm);
+            printf("Slot to copy into: %d\n", slot);
+            vm->stack->values[slot] = vm->stackTop[-1];
+            break;
+        }
+        case OP_JUMP_IF_FALSE:
+        {
+            uint16_t offset = READ_U16(vm);
+            if (IS_FALSEY(vm->stackTop[-1]))
+                vm->ip += offset;
+            break;
+        }
+        case OP_JUMP_IF_TRUE: {
+            uint16_t offset = READ_U16(vm);
+            if (IS_TRUTHY(vm->stackTop[-1]))
+                vm->ip += offset;
+            break;
+        }
+        case OP_JUMP:
+        {
+            uint16_t offset = READ_U16(vm);
+            vm->ip += offset;
+            break;
+        }
+        case OP_LOOP: {
+            uint16_t offset = READ_U16(vm);
+            vm->ip -= offset;
+            break;
+        }
         case OP_NEGATE:
         {
             Value top = vm->stackTop[-1];
@@ -399,6 +436,13 @@ static InterpretResult run(VM *vm)
             pop(vm);
             break;
 
+        case OP_POPN:
+        {
+            uint16_t count = READ_U16(vm);
+            vm->stackTop = &vm->stackTop[-count];
+            break;
+        }
+
         case OP_RETURN:
         {
             printValue(pop(vm));
@@ -468,7 +512,8 @@ static void freeObj(Obj *obj)
 static void freeObjs(VM *vm)
 {
     Obj *object = vm->objs;
-    if (object == NULL) return;
+    if (object == NULL)
+        return;
 
     while (object->next != NULL)
     {

@@ -8,6 +8,7 @@
 
 static int simpleInstruction(const char *name, FILE *output, int offset);
 static int constantInstruction(Chunk *chunk, const char *name, FILE *output, int offset);
+static int loopInstruction(Chunk *chunk, FILE *output, int offset);
 static int globalDef(Chunk *chunk, FILE *output, int offset);
 
 void disassembleChunk(Chunk *chunk)
@@ -75,10 +76,20 @@ int disassembleInstruction(Chunk *chunk, FILE *output, int offset)
         return constantInstruction(chunk, "OP_GET_GLOBAL", output, offset);
     case OP_SET_GLOBAL:
         return constantInstruction(chunk, "OP_SET_GLOBAL", output, offset);
-    case OP_AND:
-        return simpleInstruction("OP_AND", output, offset);
-    case OP_OR:
-        return simpleInstruction("OP_OR", output, offset);
+     case OP_GET_LOCAL:
+        return constantInstruction(chunk, "OP_GET_LOCAL", output, offset);
+    case OP_SET_LOCAL:
+        return constantInstruction(chunk, "OP_SET_LOCAL", output, offset);
+    case OP_POPN:
+        return constantInstruction(chunk, "OP_POPN", output, offset);
+    case OP_JUMP_IF_FALSE:
+        return constantInstruction(chunk, "OP_JUMP_IF_ELSE", output, offset);
+    case OP_JUMP_IF_TRUE:
+        return constantInstruction(chunk, "OP_JUMP_IF_TRUE", output, offset);
+    case OP_JUMP:
+        return constantInstruction(chunk, "OP_JUMP", output, offset);
+    case OP_LOOP:
+        return loopInstruction(chunk, output, offset);
     default:
     {
         printf("Unknown opcode: %d\n", instruction);
@@ -91,6 +102,16 @@ static int simpleInstruction(const char *name, FILE *output, int offset)
 {
     fprintf(output, "%s\n", name);
     return offset + 1;
+}
+
+static int loopInstruction(Chunk *chunk, FILE *output, int offset) {
+    uint8_t low = chunk->code[offset + 1];
+    uint8_t high = chunk->code[offset + 2];
+
+    uint16_t index = readU16(low, high);
+
+    fprintf(output, "OP_LOOP -%d \n", index);
+    return offset + 3;
 }
 
 static int constantInstruction(Chunk *chunk, const char *name, FILE *output, int offset)
