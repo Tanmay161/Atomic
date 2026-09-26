@@ -358,12 +358,20 @@ Token scan_identifier(Scanner *s)
     {
         if (len == 4 && (memcmp(start, "bool", 4) == 0))
             return (Token){.type = DATATYPE_BOOL, .len = 4, .column = start_col, .lexeme = "bool", .line = s->line};
+        else if (len == 5 && (memcmp(start, "break", 5) == 0))
+            return (Token){.type = BREAK, .len = 5, .column = start_col, .lexeme = "break", .line = s->line};
         break;
     }
     case 'v':
     {
         if (len == 4 && (memcmp(start, "void", 4) == 0))
             return (Token){.type = DATATYPE_VOID, .len = 4, .column = start_col, .lexeme = "void", .line = s->line};
+        break;
+    }
+    case 'c':
+    {
+        if (len == 8 && (memcmp(start, "continue", 8) == 0))
+            return (Token){.type = CONTINUE, .len = 8, .column = start_col, .lexeme = "continue", .line = s->line};
         break;
     }
     }

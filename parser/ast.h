@@ -28,6 +28,8 @@ typedef enum {
     TYPE_IF,
     TYPE_WHILE,
     TYPE_RETURN,
+    TYPE_CONTINUE,
+    TYPE_BREAK,
 } StatementType;
 
 // Eval type
@@ -119,6 +121,8 @@ typedef struct {
 typedef struct {
     Expression *condition;
     Statement *body;
+
+    Statement *forIncrement;
 } WhileStmt;
 
 // Return statements

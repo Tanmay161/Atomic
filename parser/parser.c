@@ -39,6 +39,8 @@ Statement *for_statement(Parser *p);
 Statement *return_statement(Parser *p);
 Statement *statement(Parser *p);
 Statement *declaration(Parser *p);
+Statement *continue_statement(Parser *p);
+Statement *break_statement(Parser *p);
 
 Token consume(Parser *p, TokenType type, const char *message, int errorCode);
 int check(Parser *p, TokenType type);
@@ -56,7 +58,8 @@ static inline ParseRule *getRule(TokenType type);
 static Expression *expression(Parser *p);
 static Expression *parsePrecedence(Parser *p, Precedence precedence);
 
-static Expression *parse_number(Parser *p, Expression *left) {
+static Expression *parse_number(Parser *p, Expression *left)
+{
     Token prev = next_token(p->scanner);
     Expression *expr = malloc(sizeof(Expression));
 
@@ -79,7 +82,8 @@ static Expression *parse_number(Parser *p, Expression *left) {
     expr->span.endline = prev.line;
     expr->span.endcol = prev.column + prev.len;
 
-    if (prev.type == INTEGER) {
+    if (prev.type == INTEGER)
+    {
         expr->Literal.type = TYPE_INTEGER;
 
         long long value = strtoll(buf, NULL, 10);
@@ -87,7 +91,8 @@ static Expression *parse_number(Parser *p, Expression *left) {
         expr->Literal.Value.int_value = value;
     }
 
-    else if (prev.type == FLOAT) {
+    else if (prev.type == FLOAT)
+    {
         expr->Literal.type = TYPE_FLOAT;
 
         double value = strtod(buf, NULL);
@@ -99,13 +104,14 @@ static Expression *parse_number(Parser *p, Expression *left) {
     return expr;
 }
 
-static Expression *grouping(Parser *p, Expression *left) {
+static Expression *grouping(Parser *p, Expression *left)
+{
     Token l_paren = next_token(p->scanner);
     Expression *expr = parsePrecedence(p, PREC_ASSIGNMENT);
     Token r_paren = consume(p, RIGHT_PAREN, "SyntaxError: Line %d column %d\nExpected ')' to close expression, got '%.*s'\n\nMaybe you forgot a closing ')'?", 202);
 
     Expression *final = malloc(sizeof(Expression));
-    if (!final) 
+    if (!final)
         error_report(201, "MemoryError: Failed to allocate memory for AST node.\n");
 
     final->type = GROUPING;
@@ -120,14 +126,16 @@ static Expression *grouping(Parser *p, Expression *left) {
     return final;
 }
 
-static Expression *unary(Parser *p, Expression *left) {
+static Expression *unary(Parser *p, Expression *left)
+{
     Token operator = next_token(p->scanner);
     Expression *expr = parsePrecedence(p, PREC_UNARY);
 
     return construct_unary(operator, expr);
 }
 
-static Expression *binary(Parser *p, Expression *left) {
+static Expression *binary(Parser *p, Expression *left)
+{
     Token operator = next_token(p->scanner);
     ParseRule *rule = getRule(operator.type);
     Expression *right = parsePrecedence(p, (Precedence)(rule->precedence + 1));
@@ -135,7 +143,8 @@ static Expression *binary(Parser *p, Expression *left) {
     return construct_binary(left, operator, right);
 }
 
-static Expression *postfix(Parser *p, Expression *left) {    
+static Expression *postfix(Parser *p, Expression *left)
+{
     while (match(p, LEFT_PAREN))
     {
         left = finishCall(p, left);
@@ -150,7 +159,8 @@ static Expression *postfix(Parser *p, Expression *left) {
     return left;
 }
 
-static Expression *assignment(Parser *p, Expression *left) {
+static Expression *assignment(Parser *p, Expression *left)
+{
     Token operator = next_token(p->scanner);
     Expression *value = parsePrecedence(p, PREC_ASSIGNMENT);
 
@@ -159,13 +169,14 @@ static Expression *assignment(Parser *p, Expression *left) {
         Token identifier = left->Variable.identifier;
         return construct_assignment(identifier, value, operator);
     }
-    else     
+    else
         error_report(202, "SyntaxError: Line %d column %d\nInvalid assignment target", left->span.startline, left->span.startcol);
-    
+
     return left;
 }
 
-static Expression *identifier(Parser *p, Expression *left) {
+static Expression *identifier(Parser *p, Expression *left)
+{
     Expression *expr = malloc(sizeof(Expression));
     Token next = next_token(p->scanner);
 
@@ -184,28 +195,32 @@ static Expression *identifier(Parser *p, Expression *left) {
     return expr;
 }
 
-static Expression *boolean(Parser *p, Expression *left) {
+static Expression *boolean(Parser *p, Expression *left)
+{
     Token next = next_token(p->scanner);
 
     Expression *expr = malloc(sizeof(Expression));
     if (!expr)
         error_report(201, "MemoryError: Failed to allocate memory for AST node.");
-    
+
     expr->type = LITERAL;
 
-    if (next.type == TRUE) expr->Literal.type = TYPE_TRUE;
-    else expr->Literal.type = TYPE_FALSE;
+    if (next.type == TRUE)
+        expr->Literal.type = TYPE_TRUE;
+    else
+        expr->Literal.type = TYPE_FALSE;
 
     expr->span.startline = next.line;
     expr->span.startcol = next.column;
-    
+
     expr->span.endline = next.line;
     expr->span.endcol = next.column + next.len;
 
     return expr;
 }
 
-static Expression *nil(Parser *p, Expression *left) {
+static Expression *nil(Parser *p, Expression *left)
+{
     Token next = next_token(p->scanner);
     Expression *expr = malloc(sizeof(Expression));
 
@@ -227,7 +242,8 @@ static Expression *nil(Parser *p, Expression *left) {
     return expr;
 }
 
-static Expression *parse_string(Parser *p, Expression *left) {
+static Expression *parse_string(Parser *p, Expression *left)
+{
     Token next = next_token(p->scanner);
     Expression *expr = malloc(sizeof(Expression));
 
@@ -252,16 +268,18 @@ static Expression *parse_string(Parser *p, Expression *left) {
     return expr;
 }
 
-static Expression *unexpected_end(Parser *p, Expression *expression) {
+static Expression *unexpected_end(Parser *p, Expression *expression)
+{
     error_report(202, "SyntaxError: Line %d column %d\nExpected expression, got <EOF>\n", p->scanner->line, p->scanner->column);
     return NULL;
 }
 
-static Expression *error(Parser *p, Expression *expression) {
+static Expression *error(Parser *p, Expression *expression)
+{
     Token next = next_token(p->scanner);
     error_report(next.code, next.lexeme);
     return NULL;
-} 
+}
 
 // Parse table
 ParseRule rules[] = {
@@ -312,6 +330,8 @@ ParseRule rules[] = {
     [FOR] = {NULL, NULL, NULL, PREC_NONE},
     [NIL] = {nil, NULL, NULL, PREC_PRIMARY},
     [RETURN] = {NULL, NULL, NULL, PREC_NONE},
+    [CONTINUE] = {NULL, NULL, NULL, PREC_NONE},
+    [BREAK] = {NULL, NULL, NULL, PREC_NONE},
     [WHILE] = {NULL, NULL, NULL, PREC_NONE},
     [TRUE] = {boolean, NULL, NULL, PREC_PRIMARY},
     [FALSE] = {boolean, NULL, NULL, PREC_PRIMARY},
@@ -320,23 +340,27 @@ ParseRule rules[] = {
     [TOKEN_ERROR] = {error, NULL, NULL, PREC_NONE},
 };
 
-static Expression *parsePrecedence(Parser *p, Precedence precedence) {
+static Expression *parsePrecedence(Parser *p, Precedence precedence)
+{
     Token next = peek_token(p->scanner);
     ParseFn prefixRule = getRule(next.type)->prefix;
 
     if (!prefixRule)
         error_report(202, "SyntaxError: Line %d column %d\nExpected expression, got '%.*s'", next.line, next.column, next.len, next.lexeme);
-    
+
     Expression *expr = prefixRule(p, NULL);
 
     next = peek_token(p->scanner);
     ParseRule *rule = getRule(next.type);
 
-    while (precedence <= rule->precedence) {
+    while (precedence <= rule->precedence)
+    {
         ParseFn nextRule = rule->infix;
-        if (!nextRule) nextRule = rule->postfix;
-        if (!nextRule) break;
-        
+        if (!nextRule)
+            nextRule = rule->postfix;
+        if (!nextRule)
+            break;
+
         expr = nextRule(p, expr);
         next = peek_token(p->scanner);
         rule = getRule(next.type);
@@ -345,7 +369,8 @@ static Expression *parsePrecedence(Parser *p, Precedence precedence) {
     return expr;
 }
 
-static inline ParseRule *getRule(TokenType type) {
+static inline ParseRule *getRule(TokenType type)
+{
     return &rules[type];
 }
 
@@ -444,11 +469,11 @@ void output_statement(Statement *statement)
     case TYPE_RETURN:
     {
         printf("return ");
-        if (statement->ReturnStmt->value != NULL) 
+        if (statement->ReturnStmt->value != NULL)
             output_expression(statement->ReturnStmt->value);
         else
             printf("nil");
-        
+
         printf("\n");
         break;
     }
@@ -897,6 +922,7 @@ Statement *construct_statement(Expression *expr, Token semicolon, StatementType 
         stmt->whileStmt = while_stmt;
         stmt->whileStmt->body = body;
         stmt->whileStmt->condition = expr;
+        stmt->whileStmt->forIncrement = NULL;
 
         stmt->span.startline = semicolon.line;
         stmt->span.startcol = semicolon.column;
@@ -911,12 +937,12 @@ Statement *construct_statement(Expression *expr, Token semicolon, StatementType 
         ReturnStmt *return_stmt = malloc(sizeof(ReturnStmt));
         if (!return_stmt)
             error_report(202, "MemoryError: Unable to allocate memory for AST node.");
-        
+
         Token return_token = va_arg(args, Token);
 
         stmt->ReturnStmt = return_stmt;
         stmt->ReturnStmt->value = expr;
-        
+
         stmt->span.startline = return_token.line;
         stmt->span.startcol = return_token.column;
 
@@ -925,6 +951,8 @@ Statement *construct_statement(Expression *expr, Token semicolon, StatementType 
 
         break;
     }
+    case TYPE_CONTINUE: break;
+    case TYPE_BREAK: break;
     }
 
     return stmt;
@@ -1092,6 +1120,44 @@ Statement *expression_statement(Parser *p)
     return NULL;
 }
 
+Statement *continue_statement(Parser *p)
+{
+    Token continue_tok = next_token(p->scanner);
+    Token semicolon = consume(p, SEMICOLON, "SyntaxError: Line %d column %d\nExpected ';' after 'continue', got '%.*s'\n\nMaybe you forgot a semicolon?", 202);
+
+    Statement *stmt = malloc(sizeof(Statement));
+    stmt->type = TYPE_CONTINUE;
+
+    SourceSpan span;
+    span.startline = continue_tok.line;
+    span.startcol = continue_tok.column;
+    span.endline = semicolon.line;
+    span.endcol = semicolon.column;
+
+    stmt->span = span;
+
+    return stmt;
+}
+
+Statement *break_statement(Parser *p)
+{
+    Token break_tok = next_token(p->scanner);
+    Token semicolon = consume(p, SEMICOLON, "SyntaxError: Line %d column %d\nExpected ';' after 'break', got '%.*s'\n\nMaybe you forgot a semicolon?", 202);
+
+    Statement *stmt = malloc(sizeof(Statement));
+    stmt->type = TYPE_BREAK;
+
+    SourceSpan span;
+    span.startline = break_tok.line;
+    span.startcol = break_tok.column;
+    span.endline = semicolon.line;
+    span.endcol = semicolon.column;
+
+    stmt->span = span;
+
+    return stmt;
+}
+
 // I chose to enforce braces to avoid the dangling else problem
 Statement *if_statement(Parser *p)
 {
@@ -1187,6 +1253,7 @@ Statement *for_statement(Parser *p)
     }
 
     Statement *body = construct_block(p);
+    Statement *incrementStmt = NULL;
 
     if (increment != NULL)
     {
@@ -1194,8 +1261,8 @@ Statement *for_statement(Parser *p)
 
         if (!newStmts)
             error_report(201, "MemoryError: Failed to allocate memory for AST node.");
-        
-        Statement *incrementStmt = construct_statement(increment, right_paren, TYPE_EXPR);
+
+        incrementStmt = construct_statement(increment, right_paren, TYPE_EXPR);
         newStmts[body->block->count++] = incrementStmt;
 
         body->block->statements = newStmts;
@@ -1220,11 +1287,12 @@ Statement *for_statement(Parser *p)
     WhileStmt *whileStmt = malloc(sizeof(WhileStmt));
     if (!whileStmt)
         error_report(201, "MemoryError: Failed to allocate memory for AST node.");
-
+    
     body_while->type = TYPE_WHILE;
     body_while->whileStmt = whileStmt;
     body_while->whileStmt->body = body;
     body_while->whileStmt->condition = condition;
+    body_while->whileStmt->forIncrement = incrementStmt;
 
     Statement *final;
     if (initializer != NULL)
@@ -1261,13 +1329,14 @@ Statement *for_statement(Parser *p)
     return final;
 }
 
-Statement *return_statement(Parser *p) {
+Statement *return_statement(Parser *p)
+{
     Token return_token = next_token(p->scanner);
     Expression *value = NULL;
 
     if (!check(p, SEMICOLON))
         value = parsePrecedence(p, PREC_ASSIGNMENT);
-    
+
     Token semicolon = consume(p, SEMICOLON, "SyntaxError: Line %d column %d\nExpected ';', got '%.*s'\nMaybe you forgot a ';' to end the statement?", 202);
     return construct_statement(value, semicolon, TYPE_RETURN, return_token);
 }
@@ -1343,6 +1412,10 @@ Statement *statement(Parser *p)
         return for_statement(p);
     case RETURN:
         return return_statement(p);
+    case BREAK:
+        return break_statement(p);
+    case CONTINUE:
+        return continue_statement(p);
     default:
         return expression_statement(p);
     }

@@ -61,6 +61,8 @@ typedef enum
     FOR,
     NIL,
     RETURN,
+    CONTINUE,
+    BREAK,
     WHILE,
     TRUE,
     FALSE,

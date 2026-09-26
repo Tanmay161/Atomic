@@ -13,6 +13,7 @@ static int globalDef(Chunk *chunk, FILE *output, int offset);
 
 void disassembleChunk(Chunk *chunk)
 {
+    printf("DISSASSEMBLING CHUNK\n");
     FILE *output = fopen("./compiler/result.abc", "w");
 
     if (!output)
@@ -25,6 +26,9 @@ void disassembleChunk(Chunk *chunk)
     {
         offset = disassembleInstruction(chunk, output, offset);
     }
+
+    printf("FINISHED DISSASSEMBLY\n");
+    fflush(output);
 }
 
 int disassembleInstruction(Chunk *chunk, FILE *output, int offset)

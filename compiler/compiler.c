@@ -10,6 +10,7 @@
 #include "object.h"
 #include "vm.h"
 #include "token.h"
+#include "memory.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -67,12 +68,22 @@ static void patchJump(Compiler *compiler, int offset, SourceSpan span)
     compiler->currentChunk->code[offset + 1] = (jump >> 8) & 0xFF;
 }
 
-static void emitLoop(Compiler *compiler, int start, SourceSpan span) {
+static void customPatchJump(Compiler *compiler, int offset, int jump, SourceSpan span)
+{
+    if (jump > UINT16_MAX)
+        error_report(404, "CompileError: Line %d column %d\nToo many instructions for conditional jump.", span.startline, span.startcol);
+
+    compiler->currentChunk->code[offset] = jump & 0xFF;
+    compiler->currentChunk->code[offset + 1] = (jump >> 8) & 0xFF;
+}
+
+static void emitLoop(Compiler *compiler, int start, SourceSpan span)
+{
     writeChunk(compiler->currentChunk, OP_LOOP, span);
 
     int jump = compiler->currentChunk->count - start + 2;
 
-    if (jump > UINT16_MAX) 
+    if (jump > UINT16_MAX)
         error_report(405, "CompileError: Line %d column %d\nLoop body too large.", span.startline, span.startcol);
 
     writeU16(compiler->currentChunk, jump, span);
@@ -160,7 +171,8 @@ static void namedVariable(Compiler *compiler, Token name, int canAssign, SourceS
     }
 }
 
-static void compile_and(Compiler *compiler, Expression *expr) {
+static void compile_and(Compiler *compiler, Expression *expr)
+{
     compile_expression(compiler, expr->Binary.Left);
     int endJump = emitJump(compiler, OP_JUMP_IF_FALSE, expr->span);
     writeChunk(compiler->currentChunk, OP_POP, expr->span);
@@ -169,7 +181,8 @@ static void compile_and(Compiler *compiler, Expression *expr) {
     patchJump(compiler, endJump, expr->span);
 }
 
-static void compile_or(Compiler *compiler, Expression *expr) {
+static void compile_or(Compiler *compiler, Expression *expr)
+{
     compile_expression(compiler, expr->Binary.Left);
 
     int endJump = emitJump(compiler, OP_JUMP_IF_TRUE, expr->span);
@@ -185,10 +198,13 @@ static void compile_expression(Compiler *compiler, Expression *expr)
     {
     case BINARY:
     {
-        if (expr->Binary.Operator.type == AND) {
+        if (expr->Binary.Operator.type == AND)
+        {
             compile_and(compiler, expr);
             return;
-        } else if (expr->Binary.Operator.type == OR) {
+        }
+        else if (expr->Binary.Operator.type == OR)
+        {
             compile_or(compiler, expr);
             return;
         }
@@ -302,8 +318,19 @@ static void compile_vardecl(Compiler *compiler, Statement *stmt)
         namedVariable(compiler, name, 1, stmt->span);
         return;
     }
-        
+
     namedVariable(compiler, name, 2, stmt->span);
+}
+
+static void compile_block_custom(Compiler *compiler, Statement *stmt, int len)
+{
+    Block *block = stmt->block;
+    compiler->scopeDepth++;
+
+    for (int i = 0; i < len; i++)
+    {
+        compile_statement(compiler, block->statements[i]);
+    }
 }
 
 static void compile_block(Compiler *compiler, Statement *stmt)
@@ -346,14 +373,16 @@ static void compile_if(Compiler *compiler, Statement *statement)
 
     writeChunk(compiler->currentChunk, OP_POP, statement->span);
 
-    if (stmt->elseBranch != NULL) {
+    if (stmt->elseBranch != NULL)
+    {
         compile_statement(compiler, stmt->elseBranch);
     }
 
     patchJump(compiler, jumpOverElse, stmt->condition->span);
 }
 
-static void compile_while(Compiler *compiler, Statement *statement) {
+static void compile_while(Compiler *compiler, Statement *statement)
+{
     WhileStmt *stmt = statement->whileStmt;
     int loopStart = compiler->currentChunk->count;
 
@@ -361,11 +390,115 @@ static void compile_while(Compiler *compiler, Statement *statement) {
 
     int exitLoop = emitJump(compiler, OP_JUMP_IF_FALSE, stmt->condition->span);
     writeChunk(compiler->currentChunk, OP_POP, stmt->condition->span);
-    compile_block(compiler, stmt->body);
+
+    LoopContext context;
+
+    context.continueTarget = (stmt->forIncrement != NULL) ? -1 : loopStart;
+    context.parent = compiler->currentLoop;
+    context.breakCount = 0;
+    context.breakCapacity = 8;
+
+    context.continueCount = 0;
+    context.continueCapacity = 8;
+
+    context.breakJumps = calloc(context.breakCapacity, sizeof(int));
+    context.continueJumps = calloc(context.continueCapacity, sizeof(int));
+
+    compiler->currentLoop = &context;
+
+    compile_block_custom(compiler, stmt->body, stmt->body->block->count - 1);
+    context.continueTarget = compiler->currentChunk->count;
+
+    compile_statement(compiler, stmt->body->block->statements[stmt->body->block->count - 1]);
+    compiler->localCount = (compiler->localCount > 0) ? compiler->localCount - 1 : 0;
+    compiler->scopeDepth--;
+
+    uint16_t count = 0;
+    while (compiler->localCount > 0 && compiler->locals[compiler->localCount - 1].depth > compiler->scopeDepth)
+    {
+        count++;
+        compiler->localCount--;
+    }
+
+    if (count > 0)
+    {
+        printf("Emitting POP_%d\n", count);
+        writeChunk(compiler->currentChunk, OP_POPN, stmt->body->span);
+        writeU16(compiler->currentChunk, count, stmt->body->span);
+    }
+
     emitLoop(compiler, loopStart, stmt->body->span);
+
+    context.breakTarget = compiler->currentChunk->count;
+
+    for (int i = 0; i < compiler->currentLoop->breakCount; i++)
+    {
+        customPatchJump(compiler, compiler->currentLoop->breakJumps[i], context.breakTarget - compiler->currentLoop->breakJumps[i] - 2, statement->span);
+    }
+
+    for (int j = 0; j < compiler->currentLoop->continueCount; j++)
+    {
+        customPatchJump(compiler, compiler->currentLoop->continueJumps[j], context.continueTarget - compiler->currentLoop->continueJumps[j] - 2, statement->span);
+    }
 
     patchJump(compiler, exitLoop, stmt->condition->span);
     writeChunk(compiler->currentChunk, OP_POP, stmt->condition->span);
+
+    compiler->currentLoop = context.parent;
+}
+
+static void compile_continue(Compiler *compiler, Statement *statement)
+{
+    if (compiler->currentLoop == NULL)
+    {
+        error_report(406, "CompileError: Line %d column %d\n'continue' cannot be used outside a loop", statement->span.startline, statement->span.startcol);
+    }
+
+    if (compiler->currentLoop->continueTarget == -1)
+    {
+        if (compiler->currentLoop->continueCount > compiler->currentLoop->continueCapacity - 1)
+        {
+            int capacity = GROW_CAPACITY(compiler->currentLoop->continueCapacity);
+            GROW_ARRAY(int, compiler->currentLoop->continueJumps, compiler->currentLoop->continueCapacity, capacity);
+
+            compiler->currentLoop->continueCapacity = capacity;
+        }
+
+        int continueJump = emitJump(compiler, OP_JUMP, statement->span);
+        compiler->currentLoop->continueJumps[compiler->currentLoop->continueCount++] = continueJump;
+    }
+    else
+    {
+        int distance = compiler->currentChunk->count - compiler->currentLoop->continueTarget;
+        if (distance > UINT16_MAX)
+            error_report(404, "CompileError: Line %d column %d\nToo many instructions for conditional jump.", statement->span.startline, statement->span.startcol);
+
+        emitLoop(compiler, distance, statement->span);
+    }
+}
+
+static void compile_break(Compiler *compiler, Statement *statement)
+{
+    if (compiler->currentLoop == NULL)
+    {
+        error_report(406, "CompileError: Line %d column %d\n'break' cannot be used outside a loop", statement->span.startline, statement->span.startcol);
+    }
+
+    int distance = compiler->currentLoop->breakTarget - compiler->currentChunk->count;
+    if (distance > UINT16_MAX)
+        error_report(404, "CompileError: Line %d column %d\nToo many instructions for conditional jump.", statement->span.startline, statement->span.startcol);
+
+    int breakJump = emitJump(compiler, OP_JUMP, statement->span);
+
+    if (compiler->currentLoop->breakCount > compiler->currentLoop->breakCapacity - 1)
+    {
+        int capacity = GROW_CAPACITY(compiler->currentLoop->breakCapacity);
+        GROW_ARRAY(int, compiler->currentLoop->breakJumps, compiler->currentLoop->breakCapacity, capacity);
+
+        compiler->currentLoop->breakCapacity = capacity;
+    }
+
+    compiler->currentLoop->breakJumps[compiler->currentLoop->breakCount++] = breakJump;
 }
 
 static void compile_statement(Compiler *compiler, Statement *stmt)
@@ -387,6 +520,12 @@ static void compile_statement(Compiler *compiler, Statement *stmt)
         break;
     case TYPE_WHILE:
         compile_while(compiler, stmt);
+        break;
+    case TYPE_CONTINUE:
+        compile_continue(compiler, stmt);
+        break;
+    case TYPE_BREAK:
+        compile_break(compiler, stmt);
         break;
     }
 }
@@ -423,6 +562,9 @@ Compiler *init_compiler(VM *vm, Program *source)
     compiler->source = source;
     compiler->currentChunk = chunk;
     compiler->vm = vm;
+
+    compiler->localCount = 0;
+    compiler->currentLoop = NULL;
 
     return compiler;
 }

@@ -254,6 +254,9 @@ static InterpretResult run(VM *vm)
         uint8_t instruction = READ_BYTE(vm);
         SourceSpan span = vm->chunk->spans[GET_INDEX(vm)];
 
+        //printf("IP: %ld\n", vm->ip - vm->chunk->code);
+        //printf("OPCODE: %d\n", instruction);
+
         switch (instruction)
         {
         case OP_DEFINE_GLOBAL:
@@ -445,8 +448,6 @@ static InterpretResult run(VM *vm)
 
         case OP_RETURN:
         {
-            printValue(pop(vm));
-            printf("\n");
             return INTERPRET_OK;
         }
         }

@@ -11,10 +11,26 @@ typedef struct {
     int depth;
 } Local;
 
+typedef struct LoopContext {
+    int continueTarget;
+    int breakTarget;
+
+    int *breakJumps;
+    int breakCount;
+    int breakCapacity;
+
+    int *continueJumps;
+    int continueCount;
+    int continueCapacity;
+
+    struct LoopContext *parent;
+} LoopContext;
+
 typedef struct {
     Local locals[UINT16_COUNT];
     int localCount;
     int scopeDepth;
+    LoopContext *currentLoop;
     Program *source;
     Chunk *currentChunk;
     VM *vm;
