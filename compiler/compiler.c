@@ -402,7 +402,9 @@ static void compile_while(Compiler *compiler, Statement *statement)
     context.continueCapacity = 8;
 
     context.breakJumps = calloc(context.breakCapacity, sizeof(int));
-    context.continueJumps = calloc(context.continueCapacity, sizeof(int));
+    if (context.continueTarget == -1)
+        context.continueJumps = calloc(context.continueCapacity, sizeof(int));
+    else context.continueJumps = NULL;
 
     compiler->currentLoop = &context;
 
@@ -444,6 +446,8 @@ static void compile_while(Compiler *compiler, Statement *statement)
     patchJump(compiler, exitLoop, stmt->condition->span);
     writeChunk(compiler->currentChunk, OP_POP, stmt->condition->span);
 
+    free(compiler->currentLoop->breakJumps);
+    free(compiler->currentLoop->continueJumps);
     compiler->currentLoop = context.parent;
 }
 

@@ -20,6 +20,13 @@ typedef struct {
     char *lexeme;
 } ObjString;
 
+typedef struct {
+    Obj obj;
+    int arity;
+    Chunk chunk;
+    ObjString *name;
+} ObjFunction;
+
 ObjString *allocateString(VM *vm, char *lexeme, int len);
 
 #endif
