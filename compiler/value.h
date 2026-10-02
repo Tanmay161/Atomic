@@ -3,7 +3,8 @@
 
 #include <stdio.h>
 #include "stringPool.h"
-#include "object.h"
+
+typedef struct Obj Obj;
 
 typedef enum {
     VAL_NIL,

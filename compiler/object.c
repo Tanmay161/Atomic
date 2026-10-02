@@ -1,6 +1,7 @@
 #include "object.h"
 #include "stringPool.h"
 #include "memory.h"
+#include "chunk.h"
 #include "vm.h"
 
 #define ALLOCATE_OBJ(vm, type, objType) \
@@ -22,4 +23,12 @@ ObjString *allocateString(VM *vm, char *lexeme, int len) {
     string->lexeme = insert_return_ptr_to_string(&vm->strings, lexeme, len);
 
     return string;
+}
+
+ObjFunction *newFunction(VM *vm) {
+    ObjFunction *function = ALLOCATE_OBJ(vm, ObjFunction, OBJ_FUNCTION);
+    function->arity = 0;
+    function->name = NULL;
+    initChunk(&function->chunk);
+    return function;
 }

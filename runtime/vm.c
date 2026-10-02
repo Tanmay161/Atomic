@@ -23,6 +23,7 @@
 #define IS_NUMERIC(value) (value.type == VAL_FLOAT || value.type == VAL_INT)
 #define IS_BOOL(value) (value.type == VAL_BOOL)
 #define IS_NIL(value) (value.type == VAL_NIL)
+#define IS_FUNCTION(value) isObjType(value, OBJ_FUNCTION)
 
 static inline int isObjType(Value value, ObjType type)
 {
@@ -31,9 +32,10 @@ static inline int isObjType(Value value, ObjType type)
 
 #define IS_STRING(value) (isObjType(value, OBJ_STRING))
 #define AS_STRING(value) ((ObjString *)value.obj)
+#define AS_FUNCTION(value) ((ObjFunction *)value.obj)
 
 #define BOOL_VAL(value) ((Value){.type = VAL_BOOL, .bool_val = value})
-#define OBJ_VAL(objstring) ((Value){.type = VAL_OBJ, .obj = (Obj *)objstring})
+#define OBJ_VAL(object) ((Value){.type = VAL_OBJ, .obj = (Obj *)object})
 
 #define NIL_VAL ((Value){.type = VAL_NIL})
 
@@ -49,6 +51,16 @@ static void printObject(Value value)
     {
         ObjString *string = AS_STRING(value);
         printf("String: '%.*s'", string->len, string->lexeme);
+    }
+    case OBJ_FUNCTION: {
+        ObjFunction *function = AS_FUNCTION(value);
+
+        if (function->name == NULL) {
+            printf("<script>");
+            return;
+        }
+
+        printf("<Function: %.*s>", function->name->len, function->name->lexeme);
     }
     }
 }
@@ -79,11 +91,14 @@ static int objsEqual(Value a, Value b)
 {
     if (a.obj->type != b.obj->type)
         return 0;
+    
     switch (a.obj->type)
     {
     case OBJ_STRING:
         return AS_STRING(a)->lexeme == AS_STRING(b)->lexeme;
     }
+
+    return 0;
 }
 
 static int valuesEqual(Value a, Value b)
@@ -150,8 +165,6 @@ VM *initVM()
     if (!vm)
         error_report(500, "MemoryError: Unable to allocate memory for virtual machine");
 
-    vm->chunk = NULL;
-
     ValueStack *stack = malloc(sizeof(ValueStack));
     if (!stack)
         error_report(500, "MemoryError: Unable to allocate memory for value stack");
@@ -169,27 +182,30 @@ VM *initVM()
     vm->strings = initPool();
     vm->globals = initMap();
 
+    vm->frameCount = 0;
+
     return vm;
 }
 
 static InterpretResult run(VM *vm)
 {
     printf("VM initiate run...\n\n");
-#define READ_BYTE(vm) (*vm->ip++)
-#define READ_U16(vm)            \
-    ((uint16_t)READ_BYTE(vm)) | \
-        ((uint16_t)READ_BYTE(vm) << 8)
-#define READ_CONSTANT(vm) (vm->chunk->constants.values[READ_U16(vm)])
-#define GET_INDEX(vm) (vm->ip - vm->chunk->code - 1)
+    CallFrame *frame = &vm->frames[vm->frameCount - 1];
+#define READ_BYTE() (*frame->ip++)
+#define READ_U16()            \
+    ((uint16_t)READ_BYTE()) | \
+        ((uint16_t)READ_BYTE() << 8)
+#define READ_CONSTANT() (frame->function->chunk.constants.values[READ_U16()])
+#define GET_INDEX() (frame->ip - frame->function->chunk.code - 1)
 
-#define READ_STRING(vm) AS_STRING(READ_CONSTANT(vm))
+#define READ_STRING() AS_STRING(READ_CONSTANT())
 
-#define BINARY_OP(vm, op)                                                                                                                           \
+#define BINARY_OP(op)                                                                                                                           \
     do                                                                                                                                              \
     {                                                                                                                                               \
         Value b = pop(vm);                                                                                                                          \
         Value a = pop(vm);                                                                                                                          \
-        SourceSpan span = vm->chunk->spans[GET_INDEX(vm)];                                                                                          \
+        SourceSpan span = frame->function->chunk.spans[GET_INDEX()];                                                                                          \
                                                                                                                                                     \
         if (!IS_NUMERIC(a) || !IS_NUMERIC(b))                                                                                                       \
         {                                                                                                                                           \
@@ -251,8 +267,8 @@ static InterpretResult run(VM *vm)
         FILE *output = fopen("./compiler/result.abc", "a");
         // disassembleInstruction(vm->chunk, output, (int) (vm->ip - vm->chunk->code));
 #endif
-        uint8_t instruction = READ_BYTE(vm);
-        SourceSpan span = vm->chunk->spans[GET_INDEX(vm)];
+        uint8_t instruction = READ_BYTE();
+        SourceSpan span = frame->function->chunk.spans[GET_INDEX()];
 
         //printf("IP: %ld\n", vm->ip - vm->chunk->code);
         //printf("OPCODE: %d\n", instruction);
@@ -261,14 +277,14 @@ static InterpretResult run(VM *vm)
         {
         case OP_DEFINE_GLOBAL:
         {
-            ObjString *name = READ_STRING(vm);
+            ObjString *name = READ_STRING();
             map_set(&vm->globals, name->lexeme, name->len, vm->stackTop[-1]);
             pop(vm);
             break;
         }
         case OP_GET_GLOBAL:
         {
-            ObjString *name = READ_STRING(vm);
+            ObjString *name = READ_STRING();
             Value *val = map_get(&vm->globals, name->lexeme, name->len);
 
             if (!val)
@@ -281,7 +297,7 @@ static InterpretResult run(VM *vm)
         }
         case OP_SET_GLOBAL:
         {
-            ObjString *name = READ_STRING(vm);
+            ObjString *name = READ_STRING();
 
             if (map_set(&vm->globals, name->lexeme, name->len, vm->stackTop[-1]))
             {
@@ -292,39 +308,39 @@ static InterpretResult run(VM *vm)
         }
         case OP_GET_LOCAL:
         {
-            uint16_t slot = READ_U16(vm);
-            push(vm, vm->stack->values[slot]);
+            uint16_t slot = READ_U16();
+            push(vm, frame->slots[slot]);
             break;
         }
         case OP_SET_LOCAL:
         {
-            uint16_t slot = READ_U16(vm);
+            uint16_t slot = READ_U16();
             printf("Slot to copy into: %d\n", slot);
-            vm->stack->values[slot] = vm->stackTop[-1];
+            frame->slots[slot] = vm->stackTop[-1];
             break;
         }
         case OP_JUMP_IF_FALSE:
         {
-            uint16_t offset = READ_U16(vm);
+            uint16_t offset = READ_U16();
             if (IS_FALSEY(vm->stackTop[-1]))
-                vm->ip += offset;
+                frame->ip += offset;
             break;
         }
         case OP_JUMP_IF_TRUE: {
-            uint16_t offset = READ_U16(vm);
+            uint16_t offset = READ_U16();
             if (IS_TRUTHY(vm->stackTop[-1]))
-                vm->ip += offset;
+                frame->ip += offset;
             break;
         }
         case OP_JUMP:
         {
-            uint16_t offset = READ_U16(vm);
-            vm->ip += offset;
+            uint16_t offset = READ_U16();
+            frame->ip += offset;
             break;
         }
         case OP_LOOP: {
-            uint16_t offset = READ_U16(vm);
-            vm->ip -= offset;
+            uint16_t offset = READ_U16();
+            frame->ip -= offset;
             break;
         }
         case OP_NEGATE:
@@ -360,29 +376,29 @@ static InterpretResult run(VM *vm)
             if (IS_STRING(a) && IS_STRING(b))
                 concatenate(vm);
             else
-                BINARY_OP(vm, +);
+                BINARY_OP(+);
             break;
         }
         case OP_SUBTRACT:
-            BINARY_OP(vm, -);
+            BINARY_OP(-);
             break;
         case OP_MULTIPLY:
-            BINARY_OP(vm, *);
+            BINARY_OP(*);
             break;
         case OP_DIVIDE:
-            BINARY_OP(vm, /);
+            BINARY_OP(/);
             break;
         case OP_GREATER:
-            BINARY_OP(vm, >);
+            BINARY_OP(>);
             break;
         case OP_GREATER_EQUAL:
-            BINARY_OP(vm, >=);
+            BINARY_OP(>=);
             break;
         case OP_LESS:
-            BINARY_OP(vm, <);
+            BINARY_OP(<);
             break;
         case OP_LESS_EQUAL:
-            BINARY_OP(vm, <=);
+            BINARY_OP(<=);
             break;
         case OP_MOD:
         {
@@ -401,7 +417,7 @@ static InterpretResult run(VM *vm)
 
         case OP_CONSTANT:
         {
-            Value constant = READ_CONSTANT(vm);
+            Value constant = READ_CONSTANT();
             push(vm, constant);
 
             break;
@@ -441,7 +457,7 @@ static InterpretResult run(VM *vm)
 
         case OP_POPN:
         {
-            uint16_t count = READ_U16(vm);
+            uint16_t count = READ_U16();
             vm->stackTop = &vm->stackTop[-count];
             break;
         }
@@ -461,15 +477,16 @@ static InterpretResult run(VM *vm)
 #undef READ_STRING
 }
 
-InterpretResult interpret(VM *vm, Chunk *chunk)
+InterpretResult interpret(VM *vm, ObjFunction *function)
 {
-    vm->chunk = chunk;
-    vm->ip = vm->chunk->code;
+    push(vm, OBJ_VAL(function));
 
-    InterpretResult result = run(vm);
+    CallFrame *frame = &vm->frames[vm->frameCount++];
+    frame->function = function;
+    frame->ip = function->chunk.code;
+    frame->slots = vm->stack->values;
 
-    freeChunk(chunk);
-    return result;
+    return run(vm);
 }
 
 void push(VM *vm, Value value)
@@ -519,6 +536,13 @@ static void freeObjs(VM *vm)
     while (object->next != NULL)
     {
         Obj *next = object->next;
+
+        switch (object->type) {
+            case OBJ_FUNCTION: {
+                ObjFunction *function = (ObjFunction*) object;
+                break;
+            }
+        }
 
         FREE(Obj, object);
         object = next;

@@ -4,10 +4,17 @@
 #define OBJ_TYPE(value) (value.obj->type)
 
 typedef struct VM VM;
+#include "chunk.h"
 
 typedef enum {
     OBJ_STRING,
+    OBJ_FUNCTION,
 } ObjType;
+
+typedef enum {
+    TYPE_FUNCTION,
+    TYPE_SCRIPT
+} FunctionType;
 
 typedef struct Obj {
     ObjType type;
@@ -28,5 +35,6 @@ typedef struct {
 } ObjFunction;
 
 ObjString *allocateString(VM *vm, char *lexeme, int len);
+ObjFunction *newFunction(VM *vm);
 
 #endif

@@ -45,27 +45,33 @@ ValueType type_to_val_type[] = {
 static void addLocal(Compiler *compiler, Token token);
 static void compile_statement(Compiler *compiler, Statement *stmt);
 
-Chunk *compile(Compiler *compiler);
+static void compile_block(Compiler *compiler, Statement *stmt);
+
+ObjFunction *compile(Compiler *compiler);
 static void compile_expression(Compiler *compiler, Expression *expr);
+
+static Chunk *currentChunk(Compiler *compiler) {
+    return &compiler->function->chunk;
+}
 
 static int emitJump(Compiler *compiler, uint8_t instruction, SourceSpan span)
 {
-    writeChunk(compiler->currentChunk, instruction, span);
-    writeChunk(compiler->currentChunk, 0xFF, span);
-    writeChunk(compiler->currentChunk, 0xFF, span);
+    writeChunk(currentChunk(compiler), instruction, span);
+    writeChunk(currentChunk(compiler), 0xFF, span);
+    writeChunk(currentChunk(compiler), 0xFF, span);
 
-    return compiler->currentChunk->count - 2;
+    return currentChunk(compiler)->count - 2;
 }
 
 static void patchJump(Compiler *compiler, int offset, SourceSpan span)
 {
-    int jump = compiler->currentChunk->count - offset - 2;
+    int jump = currentChunk(compiler)->count - offset - 2;
 
     if (jump > UINT16_MAX)
         error_report(404, "CompileError: Line %d column %d\nToo many instructions for conditional jump.", span.startline, span.startcol);
 
-    compiler->currentChunk->code[offset] = jump & 0xFF;
-    compiler->currentChunk->code[offset + 1] = (jump >> 8) & 0xFF;
+    currentChunk(compiler)->code[offset] = jump & 0xFF;
+    currentChunk(compiler)->code[offset + 1] = (jump >> 8) & 0xFF;
 }
 
 static void customPatchJump(Compiler *compiler, int offset, int jump, SourceSpan span)
@@ -73,20 +79,20 @@ static void customPatchJump(Compiler *compiler, int offset, int jump, SourceSpan
     if (jump > UINT16_MAX)
         error_report(404, "CompileError: Line %d column %d\nToo many instructions for conditional jump.", span.startline, span.startcol);
 
-    compiler->currentChunk->code[offset] = jump & 0xFF;
-    compiler->currentChunk->code[offset + 1] = (jump >> 8) & 0xFF;
+    currentChunk(compiler)->code[offset] = jump & 0xFF;
+    currentChunk(compiler)->code[offset + 1] = (jump >> 8) & 0xFF;
 }
 
 static void emitLoop(Compiler *compiler, int start, SourceSpan span)
 {
-    writeChunk(compiler->currentChunk, OP_LOOP, span);
+    writeChunk(currentChunk(compiler), OP_LOOP, span);
 
-    int jump = compiler->currentChunk->count - start + 2;
+    int jump = currentChunk(compiler)->count - start + 2;
 
     if (jump > UINT16_MAX)
         error_report(405, "CompileError: Line %d column %d\nLoop body too large.", span.startline, span.startcol);
 
-    writeU16(compiler->currentChunk, jump, span);
+    writeU16(currentChunk(compiler), jump, span);
 }
 
 static void declareLocal(Compiler *compiler, Token tok)
@@ -149,25 +155,25 @@ static void namedVariable(Compiler *compiler, Token name, int canAssign, SourceS
         val.type = VAL_OBJ;
         val.obj = (Obj *)allocateString(compiler->vm, name.lexeme, name.len);
 
-        arg = addConstant(compiler->currentChunk, val);
+        arg = addConstant(currentChunk(compiler), val);
         setOp = OP_SET_GLOBAL;
         getOp = OP_GET_GLOBAL;
     }
 
     if (canAssign == 1)
     {
-        writeChunk(compiler->currentChunk, setOp, span);
-        writeU16(compiler->currentChunk, arg, span);
+        writeChunk(currentChunk(compiler), setOp, span);
+        writeU16(currentChunk(compiler), arg, span);
     }
     else if (canAssign == 2)
     {
-        writeChunk(compiler->currentChunk, OP_DEFINE_GLOBAL, span);
-        writeU16(compiler->currentChunk, arg, span);
+        writeChunk(currentChunk(compiler), OP_DEFINE_GLOBAL, span);
+        writeU16(currentChunk(compiler), arg, span);
     }
     else
     {
-        writeChunk(compiler->currentChunk, getOp, span);
-        writeU16(compiler->currentChunk, arg, span);
+        writeChunk(currentChunk(compiler), getOp, span);
+        writeU16(currentChunk(compiler), arg, span);
     }
 }
 
@@ -175,7 +181,7 @@ static void compile_and(Compiler *compiler, Expression *expr)
 {
     compile_expression(compiler, expr->Binary.Left);
     int endJump = emitJump(compiler, OP_JUMP_IF_FALSE, expr->span);
-    writeChunk(compiler->currentChunk, OP_POP, expr->span);
+    writeChunk(currentChunk(compiler), OP_POP, expr->span);
 
     compile_expression(compiler, expr->Binary.Right);
     patchJump(compiler, endJump, expr->span);
@@ -186,7 +192,7 @@ static void compile_or(Compiler *compiler, Expression *expr)
     compile_expression(compiler, expr->Binary.Left);
 
     int endJump = emitJump(compiler, OP_JUMP_IF_TRUE, expr->span);
-    writeChunk(compiler->currentChunk, OP_POP, expr->span);
+    writeChunk(currentChunk(compiler), OP_POP, expr->span);
 
     compile_expression(compiler, expr->Binary.Right);
     patchJump(compiler, endJump, expr->span);
@@ -212,7 +218,7 @@ static void compile_expression(Compiler *compiler, Expression *expr)
         compile_expression(compiler, expr->Binary.Left);
         compile_expression(compiler, expr->Binary.Right);
 
-        writeChunk(compiler->currentChunk, tok_to_code_binary[expr->Binary.Operator.type], expr->span);
+        writeChunk(currentChunk(compiler), tok_to_code_binary[expr->Binary.Operator.type], expr->span);
         break;
     }
     case LITERAL:
@@ -230,13 +236,13 @@ static void compile_expression(Compiler *compiler, Expression *expr)
             value.float_val = expr->Literal.Value.float_value;
             break;
         case TYPE_TRUE:
-            writeChunk(compiler->currentChunk, OP_TRUE, expr->span);
+            writeChunk(currentChunk(compiler), OP_TRUE, expr->span);
             return;
         case TYPE_FALSE:
-            writeChunk(compiler->currentChunk, OP_FALSE, expr->span);
+            writeChunk(currentChunk(compiler), OP_FALSE, expr->span);
             return;
         case TYPE_NIL:
-            writeChunk(compiler->currentChunk, OP_NIL, expr->span);
+            writeChunk(currentChunk(compiler), OP_NIL, expr->span);
             return;
         case TYPE_STRING:
             value.obj = (Obj *)allocateString(compiler->vm, expr->Literal.Value.lexeme, expr->Literal.string_len);
@@ -244,15 +250,15 @@ static void compile_expression(Compiler *compiler, Expression *expr)
             break;
         }
 
-        int index = addConstant(compiler->currentChunk, value);
-        writeChunk(compiler->currentChunk, OP_CONSTANT, expr->span);
-        writeU16(compiler->currentChunk, index, expr->span);
+        int index = addConstant(currentChunk(compiler), value);
+        writeChunk(currentChunk(compiler), OP_CONSTANT, expr->span);
+        writeU16(currentChunk(compiler), index, expr->span);
 
         break;
     }
     case UNARY:
         compile_expression(compiler, expr->Unary.Expr);
-        writeChunk(compiler->currentChunk, tok_to_code_unary[expr->Unary.Operator.type], expr->span);
+        writeChunk(currentChunk(compiler), tok_to_code_unary[expr->Unary.Operator.type], expr->span);
         break;
     case GROUPING:
         compile_expression(compiler, expr->Grouping.Expr);
@@ -276,19 +282,19 @@ static void compile_expression(Compiler *compiler, Expression *expr)
         case EQUAL:
             break;
         case PLUS_EQUAL:
-            writeChunk(compiler->currentChunk, OP_ADD, expr->span);
+            writeChunk(currentChunk(compiler), OP_ADD, expr->span);
             break;
         case MINUS_EQUAL:
-            writeChunk(compiler->currentChunk, OP_SUBTRACT, expr->span);
+            writeChunk(currentChunk(compiler), OP_SUBTRACT, expr->span);
             break;
         case STAR_EQUAL:
-            writeChunk(compiler->currentChunk, OP_MULTIPLY, expr->span);
+            writeChunk(currentChunk(compiler), OP_MULTIPLY, expr->span);
             break;
         case SLASH_EQUAL:
-            writeChunk(compiler->currentChunk, OP_DIVIDE, expr->span);
+            writeChunk(currentChunk(compiler), OP_DIVIDE, expr->span);
             break;
         case MOD_EQUAL:
-            writeChunk(compiler->currentChunk, OP_MOD, expr->span);
+            writeChunk(currentChunk(compiler), OP_MOD, expr->span);
             break;
         }
 
@@ -300,6 +306,7 @@ static void compile_expression(Compiler *compiler, Expression *expr)
 
 static void compile_vardecl(Compiler *compiler, Statement *stmt)
 {
+    printf("Current scope depth: %d\n", compiler->scopeDepth);
     VarDecl *decl = stmt->varDecl;
 
     Token name = {
@@ -308,7 +315,7 @@ static void compile_vardecl(Compiler *compiler, Statement *stmt)
         .type = decl->type};
 
     if (decl->initializer == NULL)
-        writeChunk(compiler->currentChunk, OP_NIL, stmt->span);
+        writeChunk(currentChunk(compiler), OP_NIL, stmt->span);
     else
         compile_expression(compiler, decl->initializer);
 
@@ -320,6 +327,54 @@ static void compile_vardecl(Compiler *compiler, Statement *stmt)
     }
 
     namedVariable(compiler, name, 2, stmt->span);
+}
+
+static void compile_funcdecl(Compiler *compiler, Statement *stmt) {
+    FuncDecl *funcdecl = stmt->funcDecl;
+
+    Compiler c = {0};
+    c.vm = compiler->vm;
+    c.localCount = 0;
+    c.scopeDepth = 1;
+    c.currentLoop = NULL;
+
+    c.function = newFunction(compiler->vm);
+
+    c.function->name = allocateString(compiler->vm, funcdecl->identifier.lexeme, funcdecl->identifier.len);
+    c.type = TYPE_FUNCTION;
+
+    c.function->arity = funcdecl->arity;
+    initChunk(&c.function->chunk);
+
+    for (int i = 0; i < c.function->arity; i++) {
+        declareLocal(&c, funcdecl->parameters[i].identifier);
+    }
+    
+    Statement blockStmt;
+    blockStmt.type = TYPE_BLOCK;
+    blockStmt.block = funcdecl->body;
+
+    compile_block(&c, &blockStmt);
+    writeChunk(currentChunk(&c), OP_RETURN, stmt->span);
+
+    ObjFunction *function = c.function;
+    writeChunk(currentChunk(compiler), OP_CONSTANT, stmt->span);
+
+    Value val;
+    val.type = VAL_OBJ;
+    val.obj = (Obj *) function;
+
+    int index = addConstant(currentChunk(compiler), val);
+    writeU16(currentChunk(compiler), index, stmt->span);
+
+    if (compiler->scopeDepth > 0)
+    {
+        addLocal(compiler, funcdecl->identifier);
+        namedVariable(compiler, funcdecl->identifier, 1, stmt->span);
+        return;
+    }
+
+    namedVariable(compiler, funcdecl->identifier, 2, stmt->span);
 }
 
 static void compile_block_custom(Compiler *compiler, Statement *stmt, int len)
@@ -335,8 +390,10 @@ static void compile_block_custom(Compiler *compiler, Statement *stmt, int len)
 
 static void compile_block(Compiler *compiler, Statement *stmt)
 {
+    printf("Compiling block...\n");
     Block *block = stmt->block;
     compiler->scopeDepth++;
+    printf("Modified scopeDepth: %d\n", compiler->scopeDepth);
 
     for (int i = 0; i < block->count; i++)
     {
@@ -354,8 +411,8 @@ static void compile_block(Compiler *compiler, Statement *stmt)
 
     if (count > 0)
     {
-        writeChunk(compiler->currentChunk, OP_POPN, stmt->span);
-        writeU16(compiler->currentChunk, count, stmt->span);
+        writeChunk(currentChunk(compiler), OP_POPN, stmt->span);
+        writeU16(currentChunk(compiler), count, stmt->span);
     }
 }
 
@@ -365,13 +422,13 @@ static void compile_if(Compiler *compiler, Statement *statement)
     compile_expression(compiler, stmt->condition);
 
     int jumpOverThen = emitJump(compiler, OP_JUMP_IF_FALSE, stmt->condition->span);
-    writeChunk(compiler->currentChunk, OP_POP, statement->span);
+    writeChunk(currentChunk(compiler), OP_POP, statement->span);
     compile_statement(compiler, stmt->thenBranch);
 
     int jumpOverElse = emitJump(compiler, OP_JUMP, stmt->condition->span);
     patchJump(compiler, jumpOverThen, stmt->condition->span);
 
-    writeChunk(compiler->currentChunk, OP_POP, statement->span);
+    writeChunk(currentChunk(compiler), OP_POP, statement->span);
 
     if (stmt->elseBranch != NULL)
     {
@@ -384,12 +441,12 @@ static void compile_if(Compiler *compiler, Statement *statement)
 static void compile_while(Compiler *compiler, Statement *statement)
 {
     WhileStmt *stmt = statement->whileStmt;
-    int loopStart = compiler->currentChunk->count;
+    int loopStart = currentChunk(compiler)->count;
 
     compile_expression(compiler, stmt->condition);
 
     int exitLoop = emitJump(compiler, OP_JUMP_IF_FALSE, stmt->condition->span);
-    writeChunk(compiler->currentChunk, OP_POP, stmt->condition->span);
+    writeChunk(currentChunk(compiler), OP_POP, stmt->condition->span);
 
     LoopContext context;
 
@@ -409,7 +466,7 @@ static void compile_while(Compiler *compiler, Statement *statement)
     compiler->currentLoop = &context;
 
     compile_block_custom(compiler, stmt->body, stmt->body->block->count - 1);
-    context.continueTarget = compiler->currentChunk->count;
+    context.continueTarget = currentChunk(compiler)->count;
 
     compile_statement(compiler, stmt->body->block->statements[stmt->body->block->count - 1]);
     compiler->localCount = (compiler->localCount > 0) ? compiler->localCount - 1 : 0;
@@ -425,13 +482,13 @@ static void compile_while(Compiler *compiler, Statement *statement)
     if (count > 0)
     {
         printf("Emitting POP_%d\n", count);
-        writeChunk(compiler->currentChunk, OP_POPN, stmt->body->span);
-        writeU16(compiler->currentChunk, count, stmt->body->span);
+        writeChunk(currentChunk(compiler), OP_POPN, stmt->body->span);
+        writeU16(currentChunk(compiler), count, stmt->body->span);
     }
 
     emitLoop(compiler, loopStart, stmt->body->span);
 
-    context.breakTarget = compiler->currentChunk->count;
+    context.breakTarget = currentChunk(compiler)->count;
 
     for (int i = 0; i < compiler->currentLoop->breakCount; i++)
     {
@@ -444,7 +501,7 @@ static void compile_while(Compiler *compiler, Statement *statement)
     }
 
     patchJump(compiler, exitLoop, stmt->condition->span);
-    writeChunk(compiler->currentChunk, OP_POP, stmt->condition->span);
+    writeChunk(currentChunk(compiler), OP_POP, stmt->condition->span);
 
     free(compiler->currentLoop->breakJumps);
     free(compiler->currentLoop->continueJumps);
@@ -473,7 +530,7 @@ static void compile_continue(Compiler *compiler, Statement *statement)
     }
     else
     {
-        int distance = compiler->currentChunk->count - compiler->currentLoop->continueTarget;
+        int distance = currentChunk(compiler)->count - compiler->currentLoop->continueTarget;
         if (distance > UINT16_MAX)
             error_report(404, "CompileError: Line %d column %d\nToo many instructions for conditional jump.", statement->span.startline, statement->span.startcol);
 
@@ -488,7 +545,7 @@ static void compile_break(Compiler *compiler, Statement *statement)
         error_report(406, "CompileError: Line %d column %d\n'break' cannot be used outside a loop", statement->span.startline, statement->span.startcol);
     }
 
-    int distance = compiler->currentLoop->breakTarget - compiler->currentChunk->count;
+    int distance = compiler->currentLoop->breakTarget - currentChunk(compiler)->count;
     if (distance > UINT16_MAX)
         error_report(404, "CompileError: Line %d column %d\nToo many instructions for conditional jump.", statement->span.startline, statement->span.startcol);
 
@@ -511,7 +568,7 @@ static void compile_statement(Compiler *compiler, Statement *stmt)
     {
     case TYPE_EXPR:
         compile_expression(compiler, stmt->exprStmt->expr);
-        writeChunk(compiler->currentChunk, OP_POP, stmt->exprStmt->expr->span);
+        writeChunk(currentChunk(compiler), OP_POP, stmt->exprStmt->expr->span);
         break;
     case TYPE_VARDECL:
         compile_vardecl(compiler, stmt);
@@ -531,10 +588,12 @@ static void compile_statement(Compiler *compiler, Statement *stmt)
     case TYPE_BREAK:
         compile_break(compiler, stmt);
         break;
+    case TYPE_FUNCDECL:
+        compile_funcdecl(compiler, stmt);
     }
 }
 
-Chunk *compile(Compiler *compiler)
+ObjFunction *compile(Compiler *compiler)
 {
     Program *source = compiler->source;
 
@@ -544,10 +603,18 @@ Chunk *compile(Compiler *compiler)
     }
 
     SourceSpan span;
-    span = source->statements[source->count - 1]->span;
 
-    writeChunk(compiler->currentChunk, OP_RETURN, span);
-    return compiler->currentChunk;
+    if (source->count > 0) {
+        span = source->statements[source->count - 1]->span;
+    } else {
+        span.startline = 0;
+        span.startcol = 0;
+        span.endline = 0;
+        span.endcol = 0;
+    }
+
+    writeChunk(currentChunk(compiler), OP_RETURN, span);
+    return compiler->function;
 }
 
 Compiler *init_compiler(VM *vm, Program *source)
@@ -557,24 +624,26 @@ Compiler *init_compiler(VM *vm, Program *source)
     if (!compiler)
         error_report(400, "MemoryError: Failed to initialize compiler");
 
-    Chunk *chunk = malloc(sizeof(Chunk));
-    if (!chunk)
-        error_report(401, "MemoryError: Failed to initialize chunk");
-
-    initChunk(chunk);
-
     compiler->source = source;
-    compiler->currentChunk = chunk;
     compiler->vm = vm;
+
+    compiler->function = newFunction(vm);
+    compiler->type = TYPE_SCRIPT;
+    initChunk(&compiler->function->chunk);
 
     compiler->localCount = 0;
     compiler->currentLoop = NULL;
+
+    Local *local = &compiler->locals[compiler->localCount++];
+    local->depth = 0;
+    local->name.lexeme = "";
+    local->name.len = 0;
 
     return compiler;
 }
 
 void free_compiler(Compiler *compiler)
 {
-    free(compiler->currentChunk);
+    free(currentChunk(compiler));
     free(compiler);
 }

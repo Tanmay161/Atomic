@@ -14,8 +14,8 @@ int main() {
     VM *vm = initVM();
     Compiler *c = init_compiler(vm, program);
 
-    Chunk *result = compile(c);
-    disassembleChunk(result);
+    ObjFunction *result = compile(c);
+    disassembleChunk(&result->chunk);
 
     interpret(vm, result);
     freeVM(vm);

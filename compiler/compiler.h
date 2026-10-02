@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "chunk.h"
 #include "vm.h"
+#include "object.h"
 
 #define UINT16_COUNT (UINT16_MAX + 1)
 
@@ -27,18 +28,23 @@ typedef struct LoopContext {
 } LoopContext;
 
 typedef struct {
+    Program *source;
+
     Local locals[UINT16_COUNT];
     int localCount;
     int scopeDepth;
+
     LoopContext *currentLoop;
-    Program *source;
-    Chunk *currentChunk;
+
+    ObjFunction *function;
+    FunctionType type;
+
     VM *vm;
 } Compiler;
 
 Compiler *init_compiler(VM *vm, Program *source);
 void free_compiler(Compiler *compiler);
 
-Chunk *compile(Compiler *compiler);
+ObjFunction *compile(Compiler *compiler);
 
 #endif

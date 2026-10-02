@@ -5,6 +5,10 @@
 #include "value.h"
 #include "stringPool.h"
 #include "hashmap.h"
+#include "object.h"
+
+#define FRAMES_MAX 64
+#define STACK_MAX (FRAMES_MAX * 256)
 
 typedef struct Obj Obj;
 
@@ -15,13 +19,20 @@ typedef enum {
 } InterpretResult;
 
 typedef struct {
+    ObjFunction *function;
+    uint8_t *ip;
+    Value *slots;
+} CallFrame;
+
+typedef struct {
     Value *values;
     int capacity;
 } ValueStack;
 
 typedef struct VM {
-    Chunk *chunk;
-    uint8_t* ip;
+    CallFrame frames[FRAMES_MAX];
+    int frameCount;
+
     ValueStack *stack;
     Value *stackTop;
     Obj *objs;
@@ -31,7 +42,7 @@ typedef struct VM {
 
 VM *initVM();
 void freeVM(VM *vm);
-InterpretResult interpret(VM *vm, Chunk *chunk);
+InterpretResult interpret(VM *vm, ObjFunction *function);
 
 void push(VM *vm, Value value);
 Value pop(VM *vm);
