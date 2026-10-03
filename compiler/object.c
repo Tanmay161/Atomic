@@ -32,3 +32,9 @@ ObjFunction *newFunction(VM *vm) {
     initChunk(&function->chunk);
     return function;
 }
+
+ObjNative *newNative(VM *vm, NativeFn function) {
+    ObjNative *native = ALLOCATE_OBJ(vm, ObjNative, OBJ_NATIVE);
+    native->function = function;
+    return native;
+}

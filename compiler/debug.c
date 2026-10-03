@@ -11,10 +11,10 @@ static int constantInstruction(Chunk *chunk, const char *name, FILE *output, int
 static int loopInstruction(Chunk *chunk, FILE *output, int offset);
 static int globalDef(Chunk *chunk, FILE *output, int offset);
 
-void disassembleChunk(Chunk *chunk)
+void disassembleChunk(Chunk *chunk, const char *name)
 {
     printf("DISSASSEMBLING CHUNK\n");
-    FILE *output = fopen("./compiler/result.abc", "w");
+    FILE *output = fopen(name, "w");
 
     if (!output)
     {
@@ -94,6 +94,8 @@ int disassembleInstruction(Chunk *chunk, FILE *output, int offset)
         return constantInstruction(chunk, "OP_JUMP", output, offset);
     case OP_LOOP:
         return loopInstruction(chunk, output, offset);
+    case OP_CALL:
+        return constantInstruction(chunk, "OP_CALL", output, offset);
     default:
     {
         printf("Unknown opcode: %d\n", instruction);

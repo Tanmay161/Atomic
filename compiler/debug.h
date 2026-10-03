@@ -5,7 +5,7 @@
 
 #include "chunk.h"
 
-void disassembleChunk(Chunk *chunk);
+void disassembleChunk(Chunk *chunk, const char *name);
 int disassembleInstruction(Chunk *chunk, FILE *output, int offset);
 
 #endif

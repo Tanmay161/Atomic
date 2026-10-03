@@ -2,6 +2,8 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <time.h>
 
 #include "error.h"
 #include "vm.h"
@@ -16,7 +18,7 @@
 
 #define STRING_CONCAT_MAX_STACK_LIMIT 4096
 
-#define DEBUG_TRACE_EXECUTION
+// #define DEBUG_TRACE_EXECUTION
 #define GET_COUNT(VM) ((size_t)((VM)->stackTop - (VM)->stack->values))
 
 #define IS_OBJ(value) (value.type == VAL_OBJ)
@@ -24,6 +26,7 @@
 #define IS_BOOL(value) (value.type == VAL_BOOL)
 #define IS_NIL(value) (value.type == VAL_NIL)
 #define IS_FUNCTION(value) isObjType(value, OBJ_FUNCTION)
+#define IS_NATIVE(value) isObjType(value, OBJ_NATIVE)
 
 static inline int isObjType(Value value, ObjType type)
 {
@@ -33,6 +36,8 @@ static inline int isObjType(Value value, ObjType type)
 #define IS_STRING(value) (isObjType(value, OBJ_STRING))
 #define AS_STRING(value) ((ObjString *)value.obj)
 #define AS_FUNCTION(value) ((ObjFunction *)value.obj)
+#define AS_NATIVE(value) \
+    (((ObjNative *) value.obj)->function)
 
 #define BOOL_VAL(value) ((Value){.type = VAL_BOOL, .bool_val = value})
 #define OBJ_VAL(object) ((Value){.type = VAL_OBJ, .obj = (Obj *)object})
@@ -51,19 +56,57 @@ static void printObject(Value value)
     {
         ObjString *string = AS_STRING(value);
         printf("String: '%.*s'", string->len, string->lexeme);
+        break;
     }
-    case OBJ_FUNCTION: {
+    case OBJ_FUNCTION:
+    {
         ObjFunction *function = AS_FUNCTION(value);
 
-        if (function->name == NULL) {
+        if (function->name == NULL)
+        {
             printf("<script>");
             return;
         }
 
         printf("<Function: %.*s>", function->name->len, function->name->lexeme);
+        break;
     }
+    case OBJ_NATIVE:
+        printf("<Native function>");
+        break;
     }
 }
+
+static void printObjectWithoutType(Value value)
+{
+    Obj *obj = value.obj;
+    switch (obj->type)
+    {
+    case OBJ_STRING:
+    {
+        ObjString *string = AS_STRING(value);
+        printf("%.*s", string->len, string->lexeme);
+        break;
+    }
+    case OBJ_FUNCTION:
+    {
+        ObjFunction *function = AS_FUNCTION(value);
+
+        if (function->name == NULL)
+        {
+            printf("<script>");
+            return;
+        }
+
+        printf("<Function: %.*s>", function->name->len, function->name->lexeme);
+        break;
+    }
+    case OBJ_NATIVE:
+        printf("<Native function>");
+        break;
+    }
+}
+
 static void printValue(Value value)
 {
     switch (value.type)
@@ -87,11 +130,136 @@ static void printValue(Value value)
     }
 }
 
+static void printValueWithoutType(Value value)
+{
+    switch (value.type)
+    {
+    case VAL_INT:
+        printf("%lld", value.int_val);
+        break;
+    case VAL_FLOAT:
+        printf("%g", value.float_val);
+        break;
+    case VAL_OBJ:
+        printObjectWithoutType(value);
+        break;
+    case VAL_BOOL:
+        printf((value.bool_val == 1) ? "true" : "false");
+        break;
+    case VAL_NIL:
+        printf("nil");
+        break;
+    }
+}
+
+static void objToString(Value value, char *buffer, size_t size)
+{
+    Obj *obj = value.obj;
+
+    switch (obj->type)
+    {
+    case OBJ_STRING:
+    {
+        ObjString *string = AS_STRING(value);
+        snprintf(buffer, size, "String: '%.*s'", string->len, string->lexeme);
+        break;
+    }
+    case OBJ_FUNCTION:
+    {
+        ObjFunction *function = AS_FUNCTION(value);
+        ObjString *string = function->name;
+
+        snprintf(buffer, size, "<Function: %.*s>", string->len, string->lexeme);
+        break;
+    }
+    case OBJ_NATIVE: {
+        snprintf(buffer, size, "<Native function>");
+    }
+    }
+}
+
+static void valueAsString(Value value, char *buffer, size_t size)
+{
+    switch (value.type)
+    {
+    case VAL_INT:
+        snprintf(buffer, size, "Integer: %lld", value.int_val);
+        break;
+    case VAL_FLOAT:
+        snprintf(buffer, size, "Float: %g", value.float_val);
+        break;
+    case VAL_OBJ:
+        return objToString(value, buffer, size);
+    case VAL_BOOL:
+        snprintf(buffer, size, "Boolean: %s", (value.bool_val == 1) ? "true" : "false");
+        break;
+    case VAL_NIL:
+        snprintf(buffer, size, "nil");
+        break;
+    }
+}
+
+static void runtimeError(VM *vm, int code, const char *message, ...)
+{
+    va_list args;
+    va_start(args, message);
+
+    fprintf(stderr, "\n");
+    vfprintf(stderr, message, args);
+    va_end(args);
+    fprintf(stderr, "\n\n");
+
+    CallFrame *outer = &vm->frames[vm->frameCount - 1];
+    ObjFunction *offending = outer->function;
+
+    SourceSpan outerSpan = offending->chunk.spans[outer->ip - offending->chunk.code - 1];
+
+    fprintf(stderr, "The error occurred here:\n");
+    fprintf(stderr, "   ");
+
+    if (offending->name == NULL)
+    {
+        fprintf(stderr, "script");
+    }
+    else
+    {
+        fprintf(stderr, "%.*s()", offending->name->len, offending->name->lexeme);
+    }
+    fprintf(stderr, " - line %d, column %d\n\n", outerSpan.startline, outerSpan.startcol);
+
+    fprintf(stderr, "Call stack:\n");
+    for (int i = vm->frameCount - 2; i >= 0; i--)
+    {
+        CallFrame *frame = &vm->frames[i];
+        ObjFunction *function = frame->function;
+        size_t instruction = frame->ip - function->chunk.code - 1;
+
+        SourceSpan span = function->chunk.spans[instruction];
+
+        fprintf(stderr, "   ");
+        if (function->name == NULL)
+        {
+            fprintf(stderr, "%-8s", "script");
+        }
+        else
+        {
+            char name[function->name->len + 3];
+            snprintf(name, sizeof(name), "%.*s()", function->name->len, function->name->lexeme);
+
+            fprintf(stderr, "%-8s", name);
+        }
+        fprintf(stderr, " - called from line %d, column %d\n", span.startline, span.startcol);
+    }
+
+    fprintf(stderr, "\n");
+    exit(code);
+}
+
 static int objsEqual(Value a, Value b)
 {
     if (a.obj->type != b.obj->type)
         return 0;
-    
+
     switch (a.obj->type)
     {
     case OBJ_STRING:
@@ -146,7 +314,7 @@ static void concatenate(VM *vm)
     {
         char *concat = malloc(final_len);
         if (!concat)
-            error_report(501, "MemoryError: Unable to allocate memory for string");
+            runtimeError(vm, 501, "MemoryError: Unable to allocate memory for string");
 
         memcpy(concat, a->lexeme, a->len);
         memcpy(concat + a->len, b->lexeme, b->len);
@@ -158,20 +326,83 @@ static void concatenate(VM *vm)
     push(vm, OBJ_VAL(final));
 }
 
+static Value clockNative(int argCount, Value *args) {
+    return (Value) {.type = VAL_FLOAT, .float_val = (double)clock() / CLOCKS_PER_SEC};
+}
+
+static Value printNative(int argCount, Value *args) {
+    printValueWithoutType(args[0]);
+    printf("\n");
+    
+    return (Value) {.type = VAL_NIL};
+}
+
+static void defineNative(VM *vm, char *name, int len, NativeFn function) {
+    push(vm, OBJ_VAL(allocateString(vm, name, len)));
+    push(vm, OBJ_VAL(newNative(vm, function)));
+
+    map_set(&vm->globals, AS_STRING(vm->stack->values[0])->lexeme, AS_STRING(vm->stack->values[0])->len, vm->stack->values[1]);
+    pop(vm);
+    pop(vm);
+}
+
+static int call(VM *vm, ObjFunction *function, int argCount, SourceSpan span)
+{
+    if (argCount != function->arity)
+    {
+        runtimeError(vm, 505, "Runtime Error: Expected %d arguments, got %d", function->arity, argCount);
+    }
+    if (vm->frameCount == FRAMES_MAX)
+        runtimeError(vm, 506, "Runtime Error: Stack Overflow");
+
+    CallFrame *frame = &vm->frames[vm->frameCount++];
+    frame->function = function;
+    frame->ip = function->chunk.code;
+    frame->slots = (size_t)(vm->stackTop - vm->stack->values - argCount - 1);
+
+    return 1;
+}
+
+static int callValue(VM *vm, Value callee, int argCount, SourceSpan span)
+{
+    if (IS_OBJ(callee))
+    {
+        switch (OBJ_TYPE(callee))
+        {
+        case OBJ_FUNCTION:
+            return call(vm, AS_FUNCTION(callee), argCount, span);
+        case OBJ_NATIVE: {
+            NativeFn native = AS_NATIVE(callee);
+            Value result = native(argCount, vm->stackTop - argCount);
+            vm->stackTop -= argCount + 1;
+            push(vm, result);
+            return 1;
+        }
+        default:
+            break;
+        }
+    }
+
+    char buffer[1024];
+    valueAsString(callee, buffer, 1024);
+    runtimeError(vm, 505, "Runtime Error: Can only call functions, instead got %s", buffer);
+    return 0;
+}
+
 VM *initVM()
 {
     printf("initiate vm...\n");
     VM *vm = malloc(sizeof(VM));
     if (!vm)
-        error_report(500, "MemoryError: Unable to allocate memory for virtual machine");
+        runtimeError(vm, 500, "MemoryError: Unable to allocate memory for virtual machine");
 
     ValueStack *stack = malloc(sizeof(ValueStack));
     if (!stack)
-        error_report(500, "MemoryError: Unable to allocate memory for value stack");
+        runtimeError(vm, 500, "MemoryError: Unable to allocate memory for value stack");
 
     Value *values = malloc(sizeof(Value) * 64);
     if (!values)
-        error_report(500, "MemoryError: Unable to allocate memory for value stack");
+        runtimeError(vm, 500, "MemoryError: Unable to allocate memory for value stack");
 
     vm->stack = stack;
     vm->stack->values = values;
@@ -184,6 +415,8 @@ VM *initVM()
 
     vm->frameCount = 0;
 
+    defineNative(vm, "clock", 5, clockNative);
+    defineNative(vm, "print", 5, printNative);
     return vm;
 }
 
@@ -200,52 +433,51 @@ static InterpretResult run(VM *vm)
 
 #define READ_STRING() AS_STRING(READ_CONSTANT())
 
-#define BINARY_OP(op)                                                                                                                           \
-    do                                                                                                                                              \
-    {                                                                                                                                               \
-        Value b = pop(vm);                                                                                                                          \
-        Value a = pop(vm);                                                                                                                          \
-        SourceSpan span = frame->function->chunk.spans[GET_INDEX()];                                                                                          \
-                                                                                                                                                    \
-        if (!IS_NUMERIC(a) || !IS_NUMERIC(b))                                                                                                       \
-        {                                                                                                                                           \
-            printf("RuntimeError: Line %d column %d\nOperands of operator '%s' must be numeric, instead got ", span.startline, span.startcol, #op); \
-            printValue(a);                                                                                                                          \
-            printf(" and ");                                                                                                                        \
-            printValue(b);                                                                                                                          \
-            printf("\n");                                                                                                                           \
-            exit(501);                                                                                                                              \
-        }                                                                                                                                           \
-        else if (a.type == VAL_FLOAT || b.type == VAL_FLOAT)                                                                                        \
-        {                                                                                                                                           \
-            double val_a = (a.type == VAL_FLOAT) ? a.float_val : (double)a.int_val;                                                                 \
-            double val_b = (b.type == VAL_FLOAT) ? b.float_val : (double)b.int_val;                                                                 \
-                                                                                                                                                    \
-            if (#op[0] == '>' || #op[0] == '<')                                                                                                     \
-            {                                                                                                                                       \
-                push(vm, BOOL_VAL(val_a op val_b));                                                                                                 \
-                break;                                                                                                                              \
-            }                                                                                                                                       \
-            else                                                                                                                                    \
-                push(vm, (Value){.type = VAL_FLOAT, .float_val = val_a op val_b});                                                                  \
-            break;                                                                                                                                  \
-        }                                                                                                                                           \
-        else                                                                                                                                        \
-        {                                                                                                                                           \
-            if (#op[0] == '>' || #op[0] == '<' || (#op[0] == '>' && #op[1] == '=') || (#op[0] == '<' && #op[1] == '='))                             \
-            {                                                                                                                                       \
-                push(vm, BOOL_VAL(a.int_val op b.int_val));                                                                                         \
-                break;                                                                                                                              \
-            }                                                                                                                                       \
-            else if (#op[0] == '/')                                                                                                                 \
-            {                                                                                                                                       \
-                if (b.int_val == 0)                                                                                                                 \
-                    error_report(504, "RuntimeError: Line %d column %d\nDivision by 0", span.startline, span.startcol);                             \
-                push(vm, (Value){.type = VAL_FLOAT, .float_val = (double)a.int_val op(double) b.int_val});                                          \
-            }                                                                                                                                       \
-            else                                                                                                                                    \
-                push(vm, (Value){.type = VAL_INT, .int_val = a.int_val op b.int_val});                                                              \
-        }                                                                                                                                           \
+#define BINARY_OP(op)                                                                                                                          \
+    do                                                                                                                                         \
+    {                                                                                                                                          \
+        Value b = pop(vm);                                                                                                                     \
+        Value a = pop(vm);                                                                                                                     \
+        SourceSpan span = frame->function->chunk.spans[GET_INDEX()];                                                                           \
+                                                                                                                                               \
+        if (!IS_NUMERIC(a) || !IS_NUMERIC(b))                                                                                                  \
+        {                                                                                                                                      \
+            char buffer_a[1024];                                                                                                               \
+            char buffer_b[1024];                                                                                                               \
+            valueAsString(a, buffer_a, 1024);                                                                                                  \
+            valueAsString(b, buffer_b, 1024);                                                                                                  \
+            runtimeError(vm, 501, "Runtime Error: Operands of operator '%s' must be numeric, instead got %s and %s", #op, buffer_a, buffer_b); \
+        }                                                                                                                                      \
+        else if (a.type == VAL_FLOAT || b.type == VAL_FLOAT)                                                                                   \
+        {                                                                                                                                      \
+            double val_a = (a.type == VAL_FLOAT) ? a.float_val : (double)a.int_val;                                                            \
+            double val_b = (b.type == VAL_FLOAT) ? b.float_val : (double)b.int_val;                                                            \
+                                                                                                                                               \
+            if (#op[0] == '>' || #op[0] == '<')                                                                                                \
+            {                                                                                                                                  \
+                push(vm, BOOL_VAL(val_a op val_b));                                                                                            \
+                break;                                                                                                                         \
+            }                                                                                                                                  \
+            else                                                                                                                               \
+                push(vm, (Value){.type = VAL_FLOAT, .float_val = val_a op val_b});                                                             \
+            break;                                                                                                                             \
+        }                                                                                                                                      \
+        else                                                                                                                                   \
+        {                                                                                                                                      \
+            if (#op[0] == '>' || #op[0] == '<' || (#op[0] == '>' && #op[1] == '=') || (#op[0] == '<' && #op[1] == '='))                        \
+            {                                                                                                                                  \
+                push(vm, BOOL_VAL(a.int_val op b.int_val));                                                                                    \
+                break;                                                                                                                         \
+            }                                                                                                                                  \
+            else if (#op[0] == '/')                                                                                                            \
+            {                                                                                                                                  \
+                if (b.int_val == 0)                                                                                                            \
+                    runtimeError(vm, 504, "Runtime Error: Division by 0");                                                                     \
+                push(vm, (Value){.type = VAL_FLOAT, .float_val = (double)a.int_val op(double) b.int_val});                                     \
+            }                                                                                                                                  \
+            else                                                                                                                               \
+                push(vm, (Value){.type = VAL_INT, .int_val = a.int_val op b.int_val});                                                         \
+        }                                                                                                                                      \
     } while (0)
 
     for (;;)
@@ -270,8 +502,8 @@ static InterpretResult run(VM *vm)
         uint8_t instruction = READ_BYTE();
         SourceSpan span = frame->function->chunk.spans[GET_INDEX()];
 
-        //printf("IP: %ld\n", vm->ip - vm->chunk->code);
-        //printf("OPCODE: %d\n", instruction);
+        // printf("IP: %ld\n", vm->ip - vm->chunk->code);
+        // printf("OPCODE: %d\n", instruction);
 
         switch (instruction)
         {
@@ -289,7 +521,7 @@ static InterpretResult run(VM *vm)
 
             if (!val)
             {
-                error_report(502, "RuntimeError: Line %d column %d\nUndefined variable '%.*s'", span.startline, span.startcol, name->len, name->lexeme);
+                runtimeError(vm, 502, "Runtime Error: Undefined variable '%.*s'", name->len, name->lexeme);
             }
 
             push(vm, *val);
@@ -302,21 +534,20 @@ static InterpretResult run(VM *vm)
             if (map_set(&vm->globals, name->lexeme, name->len, vm->stackTop[-1]))
             {
                 map_remove(&vm->globals, name->lexeme, name->len);
-                error_report(502, "RuntimeError: Line %d column %d\nUndefined variable '%.*s'", span.startline, span.startcol, name->len, name->lexeme);
+                runtimeError(vm, 502, "Runtime Error: Undefined variable '%.*s'", name->len, name->lexeme);
             }
             break;
         }
         case OP_GET_LOCAL:
         {
             uint16_t slot = READ_U16();
-            push(vm, frame->slots[slot]);
+            push(vm, vm->stack->values[frame->slots + slot + 1]);
             break;
         }
         case OP_SET_LOCAL:
         {
             uint16_t slot = READ_U16();
-            printf("Slot to copy into: %d\n", slot);
-            frame->slots[slot] = vm->stackTop[-1];
+            vm->stack->values[frame->slots + slot + 1] = vm->stackTop[-1];
             break;
         }
         case OP_JUMP_IF_FALSE:
@@ -326,7 +557,8 @@ static InterpretResult run(VM *vm)
                 frame->ip += offset;
             break;
         }
-        case OP_JUMP_IF_TRUE: {
+        case OP_JUMP_IF_TRUE:
+        {
             uint16_t offset = READ_U16();
             if (IS_TRUTHY(vm->stackTop[-1]))
                 frame->ip += offset;
@@ -338,7 +570,8 @@ static InterpretResult run(VM *vm)
             frame->ip += offset;
             break;
         }
-        case OP_LOOP: {
+        case OP_LOOP:
+        {
             uint16_t offset = READ_U16();
             frame->ip -= offset;
             break;
@@ -349,10 +582,9 @@ static InterpretResult run(VM *vm)
 
             if (!IS_NUMERIC(top))
             {
-                printf("RuntimeError: Line %d column %d\nOperand of operator '-' must be numeric, instead got ", span.startline, span.startcol);
-                printValue(top);
-                printf("\n");
-                exit(501);
+                char buffer[1024];
+                valueAsString(top, buffer, 1024);
+                runtimeError(vm, 501, "Runtime Error: Operand of operator '-' must be numeric, instead got %s", buffer);
             }
 
             if (top.type == VAL_INT)
@@ -406,7 +638,7 @@ static InterpretResult run(VM *vm)
             Value a = pop(vm);
 
             if (a.type != VAL_INT && a.type != VAL_FLOAT && b.type != VAL_INT && b.type != VAL_FLOAT)
-                error_report(501, "RuntimeError: Line %d column %d\nOperands of '%%' operator must be numeric", span.startline, span.startcol);
+                runtimeError(vm, 501, "Runtime Error: Operands of '%%' operator must be numeric");
 
             double val_a = (a.type == VAL_FLOAT) ? a.float_val : (double)a.int_val;
             double val_b = (b.type == VAL_FLOAT) ? b.float_val : (double)b.int_val;
@@ -461,10 +693,31 @@ static InterpretResult run(VM *vm)
             vm->stackTop = &vm->stackTop[-count];
             break;
         }
-
+        case OP_CALL:
+        {
+            int argCount = READ_U16();
+            if (!callValue(vm, vm->stackTop[-argCount - 1], argCount, span))
+            {
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            frame = &vm->frames[vm->frameCount - 1];
+            break;
+        }
         case OP_RETURN:
         {
-            return INTERPRET_OK;
+            Value result = pop(vm);
+
+            if (--vm->frameCount == 0)
+            {
+                pop(vm);
+                printf("       []\n");
+                return INTERPRET_OK;
+            }
+
+            vm->stackTop = &vm->stack->values[frame->slots];
+            push(vm, result);
+            frame = &vm->frames[vm->frameCount - 1];
+            break;
         }
         }
     }
@@ -480,11 +733,13 @@ static InterpretResult run(VM *vm)
 InterpretResult interpret(VM *vm, ObjFunction *function)
 {
     push(vm, OBJ_VAL(function));
+    SourceSpan sourceSpan;
+    sourceSpan.startline = function->chunk.spans[0].startline;
+    sourceSpan.startcol = function->chunk.spans[0].startcol;
+    sourceSpan.endline = function->chunk.spans[function->chunk.count - 1].endline;
+    sourceSpan.endcol = function->chunk.spans[function->chunk.count - 1].endcol;
 
-    CallFrame *frame = &vm->frames[vm->frameCount++];
-    frame->function = function;
-    frame->ip = function->chunk.code;
-    frame->slots = vm->stack->values;
+    call(vm, function, 0, sourceSpan);
 
     return run(vm);
 }
@@ -500,7 +755,7 @@ void push(VM *vm, Value value)
 
         Value *temp = realloc(vm->stack->values, sizeof(Value) * vm->stack->capacity);
         if (!temp)
-            error_report(500, "MemoryError: Unable to allocate memory for value stack");
+            runtimeError(vm, 500, "MemoryError: Unable to allocate memory for value stack");
 
         vm->stack->values = temp;
         vm->stackTop = &vm->stack->values[count];
@@ -524,6 +779,18 @@ static void freeObj(Obj *obj)
         free(string);
         break;
     }
+    case OBJ_FUNCTION:
+    {
+        ObjFunction *function = (ObjFunction *)obj;
+        free(function);
+        break;
+    }
+    case OBJ_NATIVE:
+    {
+        ObjNative *native = (ObjNative *)obj;
+        free(native);
+        break;
+    }
     }
 }
 
@@ -537,14 +804,7 @@ static void freeObjs(VM *vm)
     {
         Obj *next = object->next;
 
-        switch (object->type) {
-            case OBJ_FUNCTION: {
-                ObjFunction *function = (ObjFunction*) object;
-                break;
-            }
-        }
-
-        FREE(Obj, object);
+        freeObj(object);
         object = next;
     }
 }

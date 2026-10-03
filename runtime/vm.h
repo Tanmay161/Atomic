@@ -21,7 +21,7 @@ typedef enum {
 typedef struct {
     ObjFunction *function;
     uint8_t *ip;
-    Value *slots;
+    size_t slots;
 } CallFrame;
 
 typedef struct {

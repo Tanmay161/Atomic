@@ -1,14 +1,18 @@
 #ifndef OBJECT_H
 #define OBJECT_H
 
+#include "chunk.h"
+
+
 #define OBJ_TYPE(value) (value.obj->type)
 
 typedef struct VM VM;
-#include "chunk.h"
+typedef Value (*NativeFn) (int argCount, Value *args);
 
 typedef enum {
     OBJ_STRING,
     OBJ_FUNCTION,
+    OBJ_NATIVE,
 } ObjType;
 
 typedef enum {
@@ -34,7 +38,13 @@ typedef struct {
     ObjString *name;
 } ObjFunction;
 
+typedef struct {
+    Obj obj;
+    NativeFn function;
+} ObjNative;
+
 ObjString *allocateString(VM *vm, char *lexeme, int len);
 ObjFunction *newFunction(VM *vm);
+ObjNative *newNative(VM *vm, NativeFn function);
 
 #endif

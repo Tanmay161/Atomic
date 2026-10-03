@@ -15,7 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-OpCode tok_to_code_binary[] = {
+#define DEBUG_FLAG
+
+OpCode tok_to_code_operators[] = {
     [PLUS] = OP_ADD,
     [MINUS] = OP_SUBTRACT,
     [STAR] = OP_MULTIPLY,
@@ -27,6 +29,8 @@ OpCode tok_to_code_binary[] = {
     [GREATER_EQUAL] = OP_GREATER_EQUAL,
     [LESS] = OP_LESS,
     [LESS_EQUAL] = OP_LESS_EQUAL,
+    [PLUS_PLUS] = OP_INCREMENT,
+    [MINUS_MINUS] = OP_DECREMENT,
 };
 
 OpCode tok_to_code_unary[] = {
@@ -218,7 +222,7 @@ static void compile_expression(Compiler *compiler, Expression *expr)
         compile_expression(compiler, expr->Binary.Left);
         compile_expression(compiler, expr->Binary.Right);
 
-        writeChunk(currentChunk(compiler), tok_to_code_binary[expr->Binary.Operator.type], expr->span);
+        writeChunk(currentChunk(compiler), tok_to_code_operators[expr->Binary.Operator.type], expr->span);
         break;
     }
     case LITERAL:
@@ -301,6 +305,15 @@ static void compile_expression(Compiler *compiler, Expression *expr)
         namedVariable(compiler, expr->Assignment.identifier, 1, expr->span);
         break;
     }
+    case CALL: {
+        compile_expression(compiler, expr->Call.callee);
+        for (int i = 0; i < expr->Call.argCount; i++) {
+            compile_expression(compiler, expr->Call.arguments[i]);
+        }
+
+        writeChunk(currentChunk(compiler), OP_CALL, expr->span);
+        writeU16(currentChunk(compiler), expr->Call.argCount, expr->span);
+    }
     }
 }
 
@@ -355,7 +368,15 @@ static void compile_funcdecl(Compiler *compiler, Statement *stmt) {
     blockStmt.block = funcdecl->body;
 
     compile_block(&c, &blockStmt);
+    writeChunk(currentChunk(&c), OP_NIL, stmt->span);
     writeChunk(currentChunk(&c), OP_RETURN, stmt->span);
+
+    char path_buffer[c.function->name->len + 16];
+    snprintf(path_buffer, sizeof(path_buffer), "./compiler/%.*s.abc", c.function->name->len, c.function->name->lexeme);
+
+    #ifdef DEBUG_FLAG
+        disassembleChunk(currentChunk(&c), path_buffer);
+    #endif
 
     ObjFunction *function = c.function;
     writeChunk(currentChunk(compiler), OP_CONSTANT, stmt->span);
@@ -562,6 +583,17 @@ static void compile_break(Compiler *compiler, Statement *statement)
     compiler->currentLoop->breakJumps[compiler->currentLoop->breakCount++] = breakJump;
 }
 
+static void compile_return(Compiler *compiler, Statement *stmt) {
+    if (compiler->type == TYPE_SCRIPT) {
+        error_report(407, "CompileError: Line %d column %d\nCan't return from top-level code.", stmt->span.startline, stmt->span.startcol);
+    }
+
+    ReturnStmt *returnStmt = stmt->ReturnStmt;
+    compile_expression(compiler, returnStmt->value);
+
+    writeChunk(currentChunk(compiler), OP_RETURN, stmt->span);
+}
+
 static void compile_statement(Compiler *compiler, Statement *stmt)
 {
     switch (stmt->type)
@@ -590,6 +622,10 @@ static void compile_statement(Compiler *compiler, Statement *stmt)
         break;
     case TYPE_FUNCDECL:
         compile_funcdecl(compiler, stmt);
+        break;
+    case TYPE_RETURN:
+        compile_return(compiler, stmt);
+        break;
     }
 }
 
@@ -614,6 +650,10 @@ ObjFunction *compile(Compiler *compiler)
     }
 
     writeChunk(currentChunk(compiler), OP_RETURN, span);
+
+    #ifdef DEBUG_FLAG
+        disassembleChunk(currentChunk(compiler), "./compiler/script.abc");
+    #endif
     return compiler->function;
 }
 
