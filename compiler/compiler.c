@@ -350,6 +350,11 @@ static void compile_funcdecl(Compiler *compiler, Statement *stmt) {
     c.localCount = 0;
     c.scopeDepth = 1;
     c.currentLoop = NULL;
+    
+    Local *local = &c.locals[c.localCount++];
+    local->depth = 0;
+    local->name.len = 0;
+    local->name.lexeme = "";
 
     c.function = newFunction(compiler->vm);
 

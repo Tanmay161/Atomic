@@ -18,7 +18,7 @@
 
 #define STRING_CONCAT_MAX_STACK_LIMIT 4096
 
-// #define DEBUG_TRACE_EXECUTION
+#define NO_DEBUG
 #define GET_COUNT(VM) ((size_t)((VM)->stackTop - (VM)->stack->values))
 
 #define IS_OBJ(value) (value.type == VAL_OBJ)
@@ -27,6 +27,19 @@
 #define IS_NIL(value) (value.type == VAL_NIL)
 #define IS_FUNCTION(value) isObjType(value, OBJ_FUNCTION)
 #define IS_NATIVE(value) isObjType(value, OBJ_NATIVE)
+
+char *val_type_to_str[] = {
+    [VAL_BOOL] = "Boolean",
+    [VAL_FLOAT] = "Float",
+    [VAL_INT] = "Integer",
+    [VAL_NIL] = "nil",
+};
+
+char *obj_type_to_str[] = {
+    [OBJ_NATIVE] = "Native",
+    [OBJ_FUNCTION] = "Function",
+    [OBJ_STRING] = "String",
+};
 
 static inline int isObjType(Value value, ObjType type)
 {
@@ -46,6 +59,39 @@ static inline int isObjType(Value value, ObjType type)
 
 #define IS_FALSEY(value) (IS_NIL(value) || (IS_BOOL(value) && !(value).bool_val))
 #define IS_TRUTHY(value) (!IS_FALSEY(value))
+
+static void printObjInfo(Value value) {
+    Obj *obj = value.obj;
+    switch (obj->type) {
+        case OBJ_STRING:
+            printf("Value: %.*s\n", AS_STRING(value)->len, AS_STRING(value)->lexeme);
+            break;
+        case OBJ_FUNCTION:
+            printf("Name: %.*s\n", AS_FUNCTION(value)->name->len, AS_FUNCTION(value)->name->lexeme);
+            printf("Arity: %d\n", AS_FUNCTION(value)->arity);
+            break;
+        case OBJ_NATIVE:
+            printf("Value: <Native function>\n");
+            break;
+    }
+}
+
+static void printValueInfo(Value value) {
+    switch (value.type) {
+        case VAL_BOOL:
+            printf("Value: %s\n", (value.bool_val == 1) ? "true" : "false");
+            break;
+        case VAL_FLOAT:
+            printf("Value: %g\n", value.float_val);
+            break;
+        case VAL_INT:
+            printf("Value: %lld\n", value.int_val);
+            break;
+        case VAL_NIL:
+            printf("Value: nil\n");
+            break;
+    }
+}
 
 static void printObject(Value value)
 {
@@ -326,14 +372,32 @@ static void concatenate(VM *vm)
     push(vm, OBJ_VAL(final));
 }
 
-static Value clockNative(int argCount, Value *args) {
+static Value clockNative(VM *vm, int argCount, Value *args) {
     return (Value) {.type = VAL_FLOAT, .float_val = (double)clock() / CLOCKS_PER_SEC};
 }
 
-static Value printNative(int argCount, Value *args) {
-    printValueWithoutType(args[0]);
+static Value printNative(VM *vm, int argCount, Value *args) {
+    for (int i = 0; i < argCount; i++) {
+        printValueWithoutType(args[i]);
+    }
     printf("\n");
     
+    return (Value) {.type = VAL_NIL};
+}
+
+static Value debugNative(VM *vm, int argCount, Value *args) {
+    Value arg = args[0];
+    printf("[Debug]\n");
+    printf("Type: ");
+    if (arg.type == VAL_OBJ) {
+        printf("%s\n", obj_type_to_str[arg.obj->type]);
+        printObjInfo(arg);
+    }
+    else {
+        printf("%s\n", val_type_to_str[arg.type]);
+        printValueInfo(arg);
+    }
+
     return (Value) {.type = VAL_NIL};
 }
 
@@ -373,7 +437,7 @@ static int callValue(VM *vm, Value callee, int argCount, SourceSpan span)
             return call(vm, AS_FUNCTION(callee), argCount, span);
         case OBJ_NATIVE: {
             NativeFn native = AS_NATIVE(callee);
-            Value result = native(argCount, vm->stackTop - argCount);
+            Value result = native(vm, argCount, vm->stackTop - argCount);
             vm->stackTop -= argCount + 1;
             push(vm, result);
             return 1;
@@ -414,9 +478,10 @@ VM *initVM()
     vm->globals = initMap();
 
     vm->frameCount = 0;
-
+    
     defineNative(vm, "clock", 5, clockNative);
     defineNative(vm, "print", 5, printNative);
+    defineNative(vm, "debug", 5, debugNative);
     return vm;
 }
 
@@ -424,12 +489,13 @@ static InterpretResult run(VM *vm)
 {
     printf("VM initiate run...\n\n");
     CallFrame *frame = &vm->frames[vm->frameCount - 1];
-#define READ_BYTE() (*frame->ip++)
+    register uint8_t *ip = frame->ip;
+#define READ_BYTE() (*ip++)
 #define READ_U16()            \
     ((uint16_t)READ_BYTE()) | \
         ((uint16_t)READ_BYTE() << 8)
 #define READ_CONSTANT() (frame->function->chunk.constants.values[READ_U16()])
-#define GET_INDEX() (frame->ip - frame->function->chunk.code - 1)
+#define GET_INDEX() (ip - frame->function->chunk.code - 1)
 
 #define READ_STRING() AS_STRING(READ_CONSTANT())
 
@@ -482,23 +548,6 @@ static InterpretResult run(VM *vm)
 
     for (;;)
     { // can be replaced with while (1)
-#ifdef DEBUG_TRACE_EXECUTION
-        printf("       ");
-
-        if (GET_COUNT(vm) == 0)
-            printf("[]");
-
-        for (Value *slot = vm->stack->values; slot < vm->stackTop; slot++)
-        {
-            printf("[");
-            printValue(*slot);
-            printf("]");
-        }
-
-        printf("\n");
-        FILE *output = fopen("./compiler/result.abc", "a");
-        // disassembleInstruction(vm->chunk, output, (int) (vm->ip - vm->chunk->code));
-#endif
         uint8_t instruction = READ_BYTE();
         SourceSpan span = frame->function->chunk.spans[GET_INDEX()];
 
@@ -541,39 +590,39 @@ static InterpretResult run(VM *vm)
         case OP_GET_LOCAL:
         {
             uint16_t slot = READ_U16();
-            push(vm, vm->stack->values[frame->slots + slot + 1]);
+            push(vm, vm->stack->values[frame->slots + slot]);
             break;
         }
         case OP_SET_LOCAL:
         {
             uint16_t slot = READ_U16();
-            vm->stack->values[frame->slots + slot + 1] = vm->stackTop[-1];
+            vm->stack->values[frame->slots + slot] = vm->stackTop[-1];
             break;
         }
         case OP_JUMP_IF_FALSE:
         {
             uint16_t offset = READ_U16();
             if (IS_FALSEY(vm->stackTop[-1]))
-                frame->ip += offset;
+                ip += offset;
             break;
         }
         case OP_JUMP_IF_TRUE:
         {
             uint16_t offset = READ_U16();
             if (IS_TRUTHY(vm->stackTop[-1]))
-                frame->ip += offset;
+                ip += offset;
             break;
         }
         case OP_JUMP:
         {
             uint16_t offset = READ_U16();
-            frame->ip += offset;
+            ip += offset;
             break;
         }
         case OP_LOOP:
         {
             uint16_t offset = READ_U16();
-            frame->ip -= offset;
+            ip -= offset;
             break;
         }
         case OP_NEGATE:
@@ -696,11 +745,15 @@ static InterpretResult run(VM *vm)
         case OP_CALL:
         {
             int argCount = READ_U16();
+            frame->ip = ip;
+            
             if (!callValue(vm, vm->stackTop[-argCount - 1], argCount, span))
             {
                 return INTERPRET_RUNTIME_ERROR;
             }
             frame = &vm->frames[vm->frameCount - 1];
+
+            ip = frame->ip;
             break;
         }
         case OP_RETURN:
@@ -717,9 +770,12 @@ static InterpretResult run(VM *vm)
             vm->stackTop = &vm->stack->values[frame->slots];
             push(vm, result);
             frame = &vm->frames[vm->frameCount - 1];
+            ip = frame->ip;
             break;
         }
         }
+
+        frame->ip = ip;
     }
 
 #undef READ_BYTE

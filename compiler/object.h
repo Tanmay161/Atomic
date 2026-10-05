@@ -7,7 +7,7 @@
 #define OBJ_TYPE(value) (value.obj->type)
 
 typedef struct VM VM;
-typedef Value (*NativeFn) (int argCount, Value *args);
+typedef Value (*NativeFn) (VM *vm, int argCount, Value *args);
 
 typedef enum {
     OBJ_STRING,
