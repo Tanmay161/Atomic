@@ -41,10 +41,12 @@ typedef struct {
 typedef struct {
     Obj obj;
     NativeFn function;
+    int arity;
+    const char *name;
 } ObjNative;
 
 ObjString *allocateString(VM *vm, char *lexeme, int len);
 ObjFunction *newFunction(VM *vm);
-ObjNative *newNative(VM *vm, NativeFn function);
+ObjNative *newNative(VM *vm, NativeFn function, int arity, const char *name);
 
 #endif

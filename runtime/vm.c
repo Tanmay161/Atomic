@@ -32,11 +32,11 @@ char *val_type_to_str[] = {
     [VAL_BOOL] = "Boolean",
     [VAL_FLOAT] = "Float",
     [VAL_INT] = "Integer",
-    [VAL_NIL] = "nil",
+    [VAL_NIL] = "Nil",
 };
 
 char *obj_type_to_str[] = {
-    [OBJ_NATIVE] = "Native",
+    [OBJ_NATIVE] = "Native Function",
     [OBJ_FUNCTION] = "Function",
     [OBJ_STRING] = "String",
 };
@@ -68,11 +68,19 @@ static void printObjInfo(Value value) {
             break;
         case OBJ_FUNCTION:
             printf("Name: %.*s\n", AS_FUNCTION(value)->name->len, AS_FUNCTION(value)->name->lexeme);
-            printf("Arity: %d\n", AS_FUNCTION(value)->arity);
+            printf("Number of parameters: %d\n", AS_FUNCTION(value)->arity);
             break;
-        case OBJ_NATIVE:
-            printf("Value: <Native function>\n");
+        case OBJ_NATIVE: {
+            ObjNative *native = (ObjNative *) value.obj;
+            printf("Name: %s\n", native->name);
+            
+            if (native->arity == -1) {
+                printf("Number of parameters: Any\n");
+            } else {
+                printf("Number of parameters: %d\n", native->arity);
+            }
             break;
+        }
     }
 }
 
@@ -271,30 +279,32 @@ static void runtimeError(VM *vm, int code, const char *message, ...)
     {
         fprintf(stderr, "%.*s()", offending->name->len, offending->name->lexeme);
     }
-    fprintf(stderr, " - line %d, column %d\n\n", outerSpan.startline, outerSpan.startcol);
+    fprintf(stderr, " - line %d, column %d", outerSpan.startline, outerSpan.startcol);
 
-    fprintf(stderr, "Call stack:\n");
-    for (int i = vm->frameCount - 2; i >= 0; i--)
-    {
-        CallFrame *frame = &vm->frames[i];
-        ObjFunction *function = frame->function;
-        size_t instruction = frame->ip - function->chunk.code - 1;
-
-        SourceSpan span = function->chunk.spans[instruction];
-
-        fprintf(stderr, "   ");
-        if (function->name == NULL)
+    if (vm->frameCount > 1) {
+        fprintf(stderr, "\n\nCall stack:\n");
+        for (int i = vm->frameCount - 2; i >= 0; i--)
         {
-            fprintf(stderr, "%-8s", "script");
-        }
-        else
-        {
-            char name[function->name->len + 3];
-            snprintf(name, sizeof(name), "%.*s()", function->name->len, function->name->lexeme);
+            CallFrame *frame = &vm->frames[i];
+            ObjFunction *function = frame->function;
+            size_t instruction = frame->ip - function->chunk.code - 1;
 
-            fprintf(stderr, "%-8s", name);
+            SourceSpan span = function->chunk.spans[instruction];
+
+            fprintf(stderr, "   ");
+            if (function->name == NULL)
+            {
+                fprintf(stderr, "%-8s", "script");
+            }
+            else
+            {
+                char name[function->name->len + 3];
+                snprintf(name, sizeof(name), "%.*s()", function->name->len, function->name->lexeme);
+
+                fprintf(stderr, "%-8s", name);
+            }
+            fprintf(stderr, " - called from line %d, column %d\n", span.startline, span.startcol);
         }
-        fprintf(stderr, " - called from line %d, column %d\n", span.startline, span.startcol);
     }
 
     fprintf(stderr, "\n");
@@ -373,6 +383,8 @@ static void concatenate(VM *vm)
 }
 
 static Value clockNative(VM *vm, int argCount, Value *args) {
+    if (argCount > 0)
+        runtimeError(vm, 507, "Native function 'clock()' expects no arguments, instead got %d", argCount);
     return (Value) {.type = VAL_FLOAT, .float_val = (double)clock() / CLOCKS_PER_SEC};
 }
 
@@ -386,6 +398,8 @@ static Value printNative(VM *vm, int argCount, Value *args) {
 }
 
 static Value debugNative(VM *vm, int argCount, Value *args) {
+    if (argCount > 1)
+        runtimeError(vm, 507, "Native function 'debug' expects 1 argument, instead got %d", argCount);
     Value arg = args[0];
     printf("[Debug]\n");
     printf("Type: ");
@@ -401,9 +415,9 @@ static Value debugNative(VM *vm, int argCount, Value *args) {
     return (Value) {.type = VAL_NIL};
 }
 
-static void defineNative(VM *vm, char *name, int len, NativeFn function) {
+static void defineNative(VM *vm, char *name, int len, NativeFn function, int arity) {
     push(vm, OBJ_VAL(allocateString(vm, name, len)));
-    push(vm, OBJ_VAL(newNative(vm, function)));
+    push(vm, OBJ_VAL(newNative(vm, function, arity, name)));
 
     map_set(&vm->globals, AS_STRING(vm->stack->values[0])->lexeme, AS_STRING(vm->stack->values[0])->len, vm->stack->values[1]);
     pop(vm);
@@ -479,9 +493,9 @@ VM *initVM()
 
     vm->frameCount = 0;
     
-    defineNative(vm, "clock", 5, clockNative);
-    defineNative(vm, "print", 5, printNative);
-    defineNative(vm, "debug", 5, debugNative);
+    defineNative(vm, "clock", 5, clockNative, 0);
+    defineNative(vm, "print", 5, printNative, -1);
+    defineNative(vm, "debug", 5, debugNative, 1);
     return vm;
 }
 
