@@ -205,6 +205,7 @@ typedef struct Expression {
         // Variable struct containing the identifier
         struct {
             Token identifier;
+            int resolvedSlot;
         } Variable;
 
         // Assignment struct

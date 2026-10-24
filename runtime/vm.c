@@ -19,7 +19,7 @@
 #define STRING_CONCAT_MAX_STACK_LIMIT 4096
 
 #define NO_DEBUG
-#define GET_COUNT(VM) ((size_t)((VM)->stackTop - (VM)->stack->values))
+#define GET_COUNT(VM) (((VM)->stackTop - (VM)->stack->values))
 
 #define IS_OBJ(value) (value.type == VAL_OBJ)
 #define IS_NUMERIC(value) (value.type == VAL_FLOAT || value.type == VAL_INT)
@@ -478,7 +478,7 @@ VM *initVM()
     if (!stack)
         runtimeError(vm, 500, "MemoryError: Unable to allocate memory for value stack");
 
-    Value *values = malloc(sizeof(Value) * 64);
+    Value *values = malloc(sizeof(Value) * 1024);
     if (!values)
         runtimeError(vm, 500, "MemoryError: Unable to allocate memory for value stack");
 
@@ -502,6 +502,49 @@ VM *initVM()
 static InterpretResult run(VM *vm)
 {
     printf("VM initiate run...\n\n");
+
+    static void *dispatch_table[] = {
+        [OP_DEFINE_GLOBAL] = &&op_define_global,
+        [OP_GET_GLOBAL] = &&op_get_global,
+        [OP_SET_GLOBAL] = &&op_set_global,
+
+        [OP_GET_LOCAL] = &&op_get_local,
+        [OP_SET_LOCAL] = &&op_set_local,
+
+        [OP_JUMP_IF_FALSE] = &&op_jump_if_false,
+        [OP_JUMP_IF_TRUE] = &&op_jump_if_true,
+        [OP_JUMP] = &&op_jump,
+        [OP_LOOP] = &&op_loop,
+
+        [OP_NEGATE] = &&op_negate,
+        [OP_NOT] = &&op_not,
+
+        [OP_ADD] = &&op_add,
+        [OP_SUBTRACT] = &&op_subtract,
+        [OP_MULTIPLY] = &&op_multiply,
+        [OP_DIVIDE] = &&op_divide,
+        [OP_MOD] = &&op_mod,
+
+        [OP_GREATER] = &&op_greater,
+        [OP_GREATER_EQUAL] = &&op_greater_equal,
+        [OP_LESS] = &&op_less,
+        [OP_LESS_EQUAL] = &&op_less_equal,
+
+        [OP_CONSTANT] = &&op_constant,
+        [OP_TRUE] = &&op_true,
+        [OP_FALSE] = &&op_false,
+        [OP_NIL] = &&op_nil,
+
+        [OP_EQUAL] = &&op_equal,
+        [OP_NOT_EQUAL] = &&op_not_equal,
+
+        [OP_POP] = &&op_pop,
+        [OP_POPN] = &&op_popn,
+
+        [OP_CALL] = &&op_call,
+        [OP_RETURN] = &&op_return,
+    };
+
     CallFrame *frame = &vm->frames[vm->frameCount - 1];
     register uint8_t *ip = frame->ip;
 #define READ_BYTE() (*ip++)
@@ -512,6 +555,7 @@ static InterpretResult run(VM *vm)
 #define GET_INDEX() (ip - frame->function->chunk.code - 1)
 
 #define READ_STRING() AS_STRING(READ_CONSTANT())
+#define DISPATCH() goto *dispatch_table[READ_BYTE()]
 
 #define BINARY_OP(op)                                                                                                                          \
     do                                                                                                                                         \
@@ -560,236 +604,229 @@ static InterpretResult run(VM *vm)
         }                                                                                                                                      \
     } while (0)
 
-    for (;;)
-    { // can be replaced with while (1)
-        uint8_t instruction = READ_BYTE();
-        SourceSpan span = frame->function->chunk.spans[GET_INDEX()];
+    DISPATCH();
 
-        // printf("IP: %ld\n", vm->ip - vm->chunk->code);
-        // printf("OPCODE: %d\n", instruction);
+    op_define_global: {
+        ObjString *name = READ_STRING();
+        map_set(&vm->globals, name->lexeme, name->len, vm->stackTop[-1]);
+        pop(vm);
+        DISPATCH();
+    }
+    
+    op_get_global: {
+        ObjString *name = READ_STRING();
+        Value *val = map_get(&vm->globals, name->lexeme, name->len);
 
-        switch (instruction)
+        if (!val)
         {
-        case OP_DEFINE_GLOBAL:
-        {
-            ObjString *name = READ_STRING();
-            map_set(&vm->globals, name->lexeme, name->len, vm->stackTop[-1]);
-            pop(vm);
-            break;
+            runtimeError(vm, 502, "Runtime Error: Undefined variable '%.*s'", name->len, name->lexeme);
         }
-        case OP_GET_GLOBAL:
-        {
-            ObjString *name = READ_STRING();
-            Value *val = map_get(&vm->globals, name->lexeme, name->len);
 
-            if (!val)
-            {
-                runtimeError(vm, 502, "Runtime Error: Undefined variable '%.*s'", name->len, name->lexeme);
-            }
+        push(vm, *val);
+        DISPATCH();
+    }
 
-            push(vm, *val);
-            break;
-        }
-        case OP_SET_GLOBAL:
-        {
-            ObjString *name = READ_STRING();
+    op_set_global: {
+        ObjString *name = READ_STRING();
 
-            if (map_set(&vm->globals, name->lexeme, name->len, vm->stackTop[-1]))
-            {
-                map_remove(&vm->globals, name->lexeme, name->len);
-                runtimeError(vm, 502, "Runtime Error: Undefined variable '%.*s'", name->len, name->lexeme);
-            }
-            break;
-        }
-        case OP_GET_LOCAL:
+        if (map_set(&vm->globals, name->lexeme, name->len, vm->stackTop[-1]))
         {
-            uint16_t slot = READ_U16();
-            push(vm, vm->stack->values[frame->slots + slot]);
-            break;
+            map_remove(&vm->globals, name->lexeme, name->len);
+            runtimeError(vm, 502, "Runtime Error: Undefined variable '%.*s'", name->len, name->lexeme);
         }
-        case OP_SET_LOCAL:
-        {
-            uint16_t slot = READ_U16();
-            vm->stack->values[frame->slots + slot] = vm->stackTop[-1];
-            break;
-        }
-        case OP_JUMP_IF_FALSE:
-        {
-            uint16_t offset = READ_U16();
-            if (IS_FALSEY(vm->stackTop[-1]))
-                ip += offset;
-            break;
-        }
-        case OP_JUMP_IF_TRUE:
-        {
-            uint16_t offset = READ_U16();
-            if (IS_TRUTHY(vm->stackTop[-1]))
-                ip += offset;
-            break;
-        }
-        case OP_JUMP:
-        {
-            uint16_t offset = READ_U16();
+        DISPATCH();
+    }
+
+    op_get_local: {
+        uint16_t slot = READ_U16();
+        push(vm, vm->stack->values[frame->slots + slot]);
+        DISPATCH();
+    }
+
+    op_set_local: {
+        uint16_t slot = READ_U16();
+        vm->stack->values[frame->slots + slot] = vm->stackTop[-1];
+        DISPATCH();
+    }
+    
+    op_jump_if_false: {
+        uint16_t offset = READ_U16();
+        if (IS_FALSEY(vm->stackTop[-1]))
             ip += offset;
-            break;
-        }
-        case OP_LOOP:
-        {
-            uint16_t offset = READ_U16();
-            ip -= offset;
-            break;
-        }
-        case OP_NEGATE:
-        {
-            Value top = vm->stackTop[-1];
-
-            if (!IS_NUMERIC(top))
-            {
-                char buffer[1024];
-                valueAsString(top, buffer, 1024);
-                runtimeError(vm, 501, "Runtime Error: Operand of operator '-' must be numeric, instead got %s", buffer);
-            }
-
-            if (top.type == VAL_INT)
-                top.int_val = -top.int_val;
-            else
-                top.float_val = -top.float_val;
-
-            vm->stackTop[-1] = top;
-            break;
-        }
-
-        case OP_NOT:
-            vm->stackTop[-1] = BOOL_VAL(IS_FALSEY(vm->stackTop[-1]));
-            break;
-
-        case OP_ADD:
-        {
-            Value b = vm->stackTop[-1];
-            Value a = vm->stackTop[-2];
-
-            if (IS_STRING(a) && IS_STRING(b))
-                concatenate(vm);
-            else
-                BINARY_OP(+);
-            break;
-        }
-        case OP_SUBTRACT:
-            BINARY_OP(-);
-            break;
-        case OP_MULTIPLY:
-            BINARY_OP(*);
-            break;
-        case OP_DIVIDE:
-            BINARY_OP(/);
-            break;
-        case OP_GREATER:
-            BINARY_OP(>);
-            break;
-        case OP_GREATER_EQUAL:
-            BINARY_OP(>=);
-            break;
-        case OP_LESS:
-            BINARY_OP(<);
-            break;
-        case OP_LESS_EQUAL:
-            BINARY_OP(<=);
-            break;
-        case OP_MOD:
-        {
-            Value b = pop(vm);
-            Value a = pop(vm);
-
-            if (a.type != VAL_INT && a.type != VAL_FLOAT && b.type != VAL_INT && b.type != VAL_FLOAT)
-                runtimeError(vm, 501, "Runtime Error: Operands of '%%' operator must be numeric");
-
-            double val_a = (a.type == VAL_FLOAT) ? a.float_val : (double)a.int_val;
-            double val_b = (b.type == VAL_FLOAT) ? b.float_val : (double)b.int_val;
-
-            push(vm, (Value){.type = VAL_FLOAT, .float_val = fmod(val_a, val_b)});
-            break;
-        }
-
-        case OP_CONSTANT:
-        {
-            Value constant = READ_CONSTANT();
-            push(vm, constant);
-
-            break;
-        }
-
-        case OP_TRUE:
-            push(vm, BOOL_VAL(1));
-            break;
-
-        case OP_FALSE:
-            push(vm, BOOL_VAL(0));
-            break;
-
-        case OP_NIL:
-            push(vm, NIL_VAL);
-            break;
-
-        case OP_EQUAL:
-        {
-            Value b = pop(vm);
-            Value a = pop(vm);
-            push(vm, BOOL_VAL(valuesEqual(a, b)));
-            break;
-        }
-
-        case OP_NOT_EQUAL:
-        {
-            Value b = pop(vm);
-            Value a = pop(vm);
-            push(vm, BOOL_VAL(!valuesEqual(a, b)));
-            break;
-        }
-
-        case OP_POP:
-            pop(vm);
-            break;
-
-        case OP_POPN:
-        {
-            uint16_t count = READ_U16();
-            vm->stackTop = &vm->stackTop[-count];
-            break;
-        }
-        case OP_CALL:
-        {
-            int argCount = READ_U16();
-            frame->ip = ip;
-            
-            if (!callValue(vm, vm->stackTop[-argCount - 1], argCount, span))
-            {
-                return INTERPRET_RUNTIME_ERROR;
-            }
-            frame = &vm->frames[vm->frameCount - 1];
-
-            ip = frame->ip;
-            break;
-        }
-        case OP_RETURN:
-        {
-            Value result = pop(vm);
-
-            if (--vm->frameCount == 0)
-            {
-                pop(vm);
-                printf("       []\n");
-                return INTERPRET_OK;
-            }
-
-            vm->stackTop = &vm->stack->values[frame->slots];
-            push(vm, result);
-            frame = &vm->frames[vm->frameCount - 1];
-            ip = frame->ip;
-            break;
-        }
-        }
-
         frame->ip = ip;
+        DISPATCH();
+    }
+    
+    op_jump_if_true: {
+        uint16_t offset = READ_U16();
+        if (IS_TRUTHY(vm->stackTop[-1]))
+            ip += offset;
+        frame->ip = ip;
+        DISPATCH();
+    }
+
+    op_jump: {
+        uint16_t offset = READ_U16();
+        ip += offset;
+        frame->ip = ip;
+        DISPATCH();
+    }
+    
+    op_loop: {
+        uint16_t offset = READ_U16();
+        ip -= offset;
+        frame->ip = ip;
+        DISPATCH();
+    }
+    
+    op_negate: {
+        Value top = vm->stackTop[-1];
+
+        if (!IS_NUMERIC(top))
+        {
+            char buffer[1024];
+            valueAsString(top, buffer, 1024);
+            runtimeError(vm, 501, "Runtime Error: Operand of operator '-' must be numeric, instead got %s", buffer);
+        }
+
+        if (top.type == VAL_INT)
+            top.int_val = -top.int_val;
+        else
+            top.float_val = -top.float_val;
+
+        vm->stackTop[-1] = top;
+        DISPATCH();
+    }
+
+    op_not: {
+        vm->stackTop[-1] = BOOL_VAL(IS_FALSEY(vm->stackTop[-1]));
+        DISPATCH();
+    }
+
+    op_add: {
+        Value b = vm->stackTop[-1];
+        Value a = vm->stackTop[-2];
+
+        if (IS_STRING(a) && IS_STRING(b))
+            concatenate(vm);
+        else
+            BINARY_OP(+);
+        DISPATCH();
+    }
+
+    op_subtract:
+        BINARY_OP(-);
+        DISPATCH();
+    
+    op_multiply:
+        BINARY_OP(*);
+        DISPATCH();
+    
+    op_divide:
+        BINARY_OP(/);
+        DISPATCH();
+    
+    op_greater:
+        BINARY_OP(>);
+        DISPATCH();
+
+    op_greater_equal:
+        BINARY_OP(>=);
+        DISPATCH();
+
+    op_less:
+        BINARY_OP(<);
+        DISPATCH();
+
+    op_less_equal:
+        BINARY_OP(<=);
+        DISPATCH();
+
+    op_mod: {
+        Value b = pop(vm);
+        Value a = pop(vm);
+
+        if ((a.type != VAL_INT && a.type != VAL_FLOAT) || (b.type != VAL_INT && b.type != VAL_FLOAT))
+            runtimeError(vm, 501, "Runtime Error: Operands of '%%' operator must be numeric");
+
+        double val_a = (a.type == VAL_FLOAT) ? a.float_val : (double)a.int_val;
+        double val_b = (b.type == VAL_FLOAT) ? b.float_val : (double)b.int_val;
+
+        push(vm, (Value){.type = VAL_FLOAT, .float_val = fmod(val_a, val_b)});
+        DISPATCH();
+    }
+
+    op_constant: {
+        push(vm, READ_CONSTANT());
+        DISPATCH();
+    }
+
+    op_true:
+        push(vm, BOOL_VAL(1));
+        DISPATCH();
+
+    op_false:
+        push(vm, BOOL_VAL(0));
+        DISPATCH();
+
+    op_nil:
+        push(vm, NIL_VAL);
+        DISPATCH();
+
+    op_equal: {
+        Value b = pop(vm);
+        Value a = pop(vm);
+        push(vm, BOOL_VAL(valuesEqual(a, b)));
+        DISPATCH();
+    }
+
+    op_not_equal: {
+        Value b = pop(vm);
+        Value a = pop(vm);
+        push(vm, BOOL_VAL(!valuesEqual(a, b)));
+        DISPATCH();
+    }
+
+    op_pop:
+        pop(vm);
+        DISPATCH();
+
+    op_popn: {
+        uint16_t count = READ_U16();
+        vm->stackTop = &vm->stackTop[-count];
+        DISPATCH();
+    }
+
+    op_call: {
+        int argCount = READ_U16();
+        frame->ip = ip;
+        SourceSpan span = frame->function->chunk.spans[GET_INDEX()];
+        
+        if (!callValue(vm, vm->stackTop[-argCount - 1], argCount, span))
+        {
+            return INTERPRET_RUNTIME_ERROR;
+        }
+        frame = &vm->frames[vm->frameCount - 1];
+
+        ip = frame->ip;
+        DISPATCH();
+    }
+
+    op_return: {
+        Value result = pop(vm);
+
+        if (--vm->frameCount == 0)
+        {
+            pop(vm);
+            printf("       []\n");
+            return INTERPRET_OK;
+        }
+
+        vm->stackTop = &vm->stack->values[frame->slots];
+        push(vm, result);
+        frame = &vm->frames[vm->frameCount - 1];
+        ip = frame->ip;
+        DISPATCH();
     }
 
 #undef READ_BYTE
@@ -816,12 +853,11 @@ InterpretResult interpret(VM *vm, ObjFunction *function)
 
 void push(VM *vm, Value value)
 {
-    size_t count = GET_COUNT(vm);
+    int count = vm->stackTop - vm->stack->values;
 
     if (count + 1 > vm->stack->capacity)
     {
-        int oldcap = vm->stack->capacity;
-        vm->stack->capacity = GROW_CAPACITY(oldcap);
+        vm->stack->capacity *= 2;
 
         Value *temp = realloc(vm->stack->values, sizeof(Value) * vm->stack->capacity);
         if (!temp)

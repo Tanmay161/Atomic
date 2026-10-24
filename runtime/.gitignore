@@ -1,2 +1,4 @@
 runtime_test.c
 runtime_test
+atomic-profile.trace
+runtime_test.dSYM
