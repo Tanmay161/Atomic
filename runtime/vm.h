@@ -37,7 +37,10 @@ typedef struct VM {
     Value *stackTop;
     Obj *objs;
     Pool strings;
-    Map globals;
+
+    Value *globals;
+    int globalCount;
+    int globalCapacity;
 } VM;
 
 VM *initVM();

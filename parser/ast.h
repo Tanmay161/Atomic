@@ -41,7 +41,6 @@ typedef enum {
     LITERAL,
     VARIABLE,
     ASSIGNMENT,
-    LOGICAL,
     CALL,
 } EvalType;
 
@@ -70,6 +69,7 @@ typedef struct {
 typedef struct {
     TokenType datatype;
     Token identifier;
+    int resolvedSlot;
 } Parameter;
 
 // Blocks
@@ -98,6 +98,9 @@ typedef struct {
 
     TokenType type;
     Expression *initializer;
+
+    int resolvedSlot;
+    int isLocal;
 } VarDecl;
 
 // Function declarations
@@ -108,6 +111,9 @@ typedef struct {
     int arity;
 
     Block *body;
+
+    int resolvedSlot;
+    int isLocal;
 } FuncDecl;
 
 // If statements
@@ -206,6 +212,7 @@ typedef struct Expression {
         struct {
             Token identifier;
             int resolvedSlot;
+            int isLocal;
         } Variable;
 
         // Assignment struct
@@ -214,6 +221,8 @@ typedef struct Expression {
             Token identifier;
             Expression *value;
             Token operator;
+            int resolvedSlot;
+            int isLocal;
         } Assignment;
 
         struct {

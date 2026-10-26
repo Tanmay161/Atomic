@@ -7,11 +7,6 @@
 
 #define UINT16_COUNT (UINT16_MAX + 1)
 
-typedef struct {
-    Token name;
-    int depth;
-} Local;
-
 typedef struct LoopContext {
     int continueTarget;
     int breakTarget;
@@ -30,8 +25,6 @@ typedef struct LoopContext {
 typedef struct {
     Program *source;
 
-    Local locals[UINT16_COUNT];
-    int localCount;
     int scopeDepth;
 
     LoopContext *currentLoop;

@@ -40,11 +40,15 @@ static Entry *constructEntries(size_t capacity)
 
     if (!entries)
         error_report(1, "MemoryError: Failed to initialize buckets for intern table");
+    
+    for (int i = 0; i < capacity; i++) {
+        entries[i].value = -1;
+    }
 
     return entries;
 }
 
-static Entry *findEntry(Entry *entries, int capacity, const char *key, uint32_t hash)
+static Entry *findEntry(Entry *entries, int capacity, const char *key, int len, uint32_t hash)
 {
     uint32_t index = hash & (capacity - 1);
 
@@ -52,19 +56,19 @@ static Entry *findEntry(Entry *entries, int capacity, const char *key, uint32_t 
     {
         Entry *entry = &entries[index];
 
-        if (entry->key == NULL && entry->value.type == VAL_NIL)
+        if (entry->key == NULL && entry->value == -1)
         {
             return entry;
         }
 
-        if (entry->hash == hash && entry->key == key)
+        if (entry->hash == hash && entry->len == len && memcmp(entry->key, key, len) == 0)
             return entry;
 
         index = (index + 1) & (capacity - 1);
     }
 }
 
-static Entry *findEntryForSet(Entry *entries, int capacity, const char *key, uint32_t hash)
+static Entry *findEntryForSet(Entry *entries, int capacity, const char *key, int len, uint32_t hash)
 {
     uint32_t index = hash & (capacity - 1);
 
@@ -75,13 +79,13 @@ static Entry *findEntryForSet(Entry *entries, int capacity, const char *key, uin
 
         if (entry->key == NULL)
         {
-            if (entry->value.type != VAL_NIL)
+            if (entry->value != -1)
                 tombstone = (tombstone == NULL) ? entry : tombstone;
             else
                 return tombstone ? tombstone : entry;
         }
 
-        if (entry->hash == hash && entry->key == key)
+        else if (entry->hash == hash && len == entry->len && memcmp(key, entry->key, len) == 0)
             return entry;
 
         index = (index + 1) & (capacity - 1);
@@ -98,7 +102,7 @@ static void adjustBuckets(Map *map, int capacity)
         if (entry->key == NULL)
             continue;
 
-        Entry *new_entry = findEntryForSet(entries, capacity, entry->key, entry->hash);
+        Entry *new_entry = findEntryForSet(entries, capacity, entry->key, entry->len, entry->hash);
         new_entry->hash = entry->hash;
         new_entry->key = entry->key;
         new_entry->value = entry->value;
@@ -109,7 +113,7 @@ static void adjustBuckets(Map *map, int capacity)
     map->capacity = capacity;
 }
 
-int map_set(Map *map, char *key, int len, Value value)
+int map_set(Map *map, char *key, int len, int value)
 {
     if (map->items + 1 > map->capacity * LOAD_FACTOR)
     {
@@ -118,7 +122,7 @@ int map_set(Map *map, char *key, int len, Value value)
     }
 
     uint32_t hash = compute_hash(key, len);
-    Entry *entry = findEntryForSet(map->entries, map->capacity, key, hash);
+    Entry *entry = findEntryForSet(map->entries, map->capacity, key, len, hash);
 
     int isNewKey = (entry->key == NULL);
     if (isNewKey)
@@ -126,26 +130,27 @@ int map_set(Map *map, char *key, int len, Value value)
 
     entry->hash = hash;
     entry->key = key;
+    entry->len = len;
     entry->value = value;
 
     return isNewKey;
 }
 
-Value *map_get(Map *map, char *key, int len)
+int map_get(Map *map, char *key, int len)
 {
     uint32_t hash = compute_hash(key, len);
-    Entry *entry = findEntry(map->entries, map->capacity, key, hash);
+    Entry *entry = findEntry(map->entries, map->capacity, key, len, hash);
 
     if (entry->key == NULL)
-        return NULL;
+        return -1;
 
-    return &entry->value;
+    return entry->value;
 }
 
 void map_remove(Map *map, char *key, int len)
 {
     uint32_t hash = compute_hash(key, len);
-    Entry *entry = findEntry(map->entries, map->capacity, key, hash);
+    Entry *entry = findEntry(map->entries, map->capacity, key, len, hash);
 
     if (entry->key != NULL)
     {

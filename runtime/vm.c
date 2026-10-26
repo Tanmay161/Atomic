@@ -17,8 +17,6 @@
 #include "hashmap.h"
 
 #define STRING_CONCAT_MAX_STACK_LIMIT 4096
-
-#define NO_DEBUG
 #define GET_COUNT(VM) (((VM)->stackTop - (VM)->stack->values))
 
 #define IS_OBJ(value) (value.type == VAL_OBJ)
@@ -419,7 +417,8 @@ static void defineNative(VM *vm, char *name, int len, NativeFn function, int ari
     push(vm, OBJ_VAL(allocateString(vm, name, len)));
     push(vm, OBJ_VAL(newNative(vm, function, arity, name)));
 
-    map_set(&vm->globals, AS_STRING(vm->stack->values[0])->lexeme, AS_STRING(vm->stack->values[0])->len, vm->stack->values[1]);
+    vm->globals[vm->globalCount++] = vm->stackTop[-1];
+
     pop(vm);
     pop(vm);
 }
@@ -481,6 +480,10 @@ VM *initVM()
     Value *values = malloc(sizeof(Value) * 1024);
     if (!values)
         runtimeError(vm, 500, "MemoryError: Unable to allocate memory for value stack");
+    
+    Value *globals = calloc(16, sizeof(Value));
+    if (!globals) 
+        runtimeError(vm, 500, "MemoryError: Unable to allocate memory for global table");
 
     vm->stack = stack;
     vm->stack->values = values;
@@ -489,13 +492,17 @@ VM *initVM()
     vm->objs = NULL;
 
     vm->strings = initPool();
-    vm->globals = initMap();
+
+    vm->globals = globals;
+    vm->globalCount = 0;
+    vm->globalCapacity = 16;
 
     vm->frameCount = 0;
     
     defineNative(vm, "clock", 5, clockNative, 0);
     defineNative(vm, "print", 5, printNative, -1);
     defineNative(vm, "debug", 5, debugNative, 1);
+
     return vm;
 }
 
@@ -607,33 +614,43 @@ static InterpretResult run(VM *vm)
     DISPATCH();
 
     op_define_global: {
-        ObjString *name = READ_STRING();
-        map_set(&vm->globals, name->lexeme, name->len, vm->stackTop[-1]);
+        uint16_t slot = READ_U16();
+
+        if (slot > vm->globalCapacity - 1) {
+            vm->globalCapacity = slot + 1;
+
+            Value *temp = realloc(vm->globals, sizeof(Value) * vm->globalCapacity);
+            if (!temp)
+                runtimeError(vm, 500, "MemoryError: Unable to allocate memory for global table");
+            
+            vm->globals = temp;
+        }
+
+        if (slot > vm->globalCapacity - 1)
+            runtimeError(vm, 502, "Runtime Error: Unable to assign global to slot %d", slot);
+            
+        vm->globals[slot] = vm->stackTop[-1];
         pop(vm);
+
+        vm->globalCount++;
         DISPATCH();
     }
     
     op_get_global: {
-        ObjString *name = READ_STRING();
-        Value *val = map_get(&vm->globals, name->lexeme, name->len);
+        uint16_t slot = READ_U16();
+        if (slot > vm->globalCapacity - 1)
+            runtimeError(vm, 502, "Runtime Error: Unable to find global at slot %d", slot);
 
-        if (!val)
-        {
-            runtimeError(vm, 502, "Runtime Error: Undefined variable '%.*s'", name->len, name->lexeme);
-        }
-
-        push(vm, *val);
+        push(vm, vm->globals[slot]);
         DISPATCH();
     }
 
     op_set_global: {
-        ObjString *name = READ_STRING();
-
-        if (map_set(&vm->globals, name->lexeme, name->len, vm->stackTop[-1]))
-        {
-            map_remove(&vm->globals, name->lexeme, name->len);
-            runtimeError(vm, 502, "Runtime Error: Undefined variable '%.*s'", name->len, name->lexeme);
-        }
+        uint16_t slot  = READ_U16();
+        if (slot > vm->globalCapacity - 1 || slot >= vm->globalCount)
+            runtimeError(vm, 502, "Runtime Error: Unable to find global at slot %d", slot);
+        
+        vm->globals[slot] = vm->stackTop[-1];
         DISPATCH();
     }
 
@@ -711,6 +728,7 @@ static InterpretResult run(VM *vm)
             concatenate(vm);
         else
             BINARY_OP(+);
+
         DISPATCH();
     }
 
@@ -906,7 +924,7 @@ static void freeObjs(VM *vm)
     if (object == NULL)
         return;
 
-    while (object->next != NULL)
+    while (object != NULL)
     {
         Obj *next = object->next;
 
@@ -921,7 +939,7 @@ void freeVM(VM *vm)
     free(vm->stack->values);
     free(vm->stack);
     free_pool(&vm->strings);
-    free_map(&vm->globals);
+    free(vm->globals);
 
     free(vm);
 }

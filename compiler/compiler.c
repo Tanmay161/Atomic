@@ -11,6 +11,7 @@
 #include "vm.h"
 #include "token.h"
 #include "memory.h"
+#include "resolver.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -46,7 +47,6 @@ ValueType type_to_val_type[] = {
     [TYPE_STRING] = VAL_OBJ,
 };
 
-static void addLocal(Compiler *compiler, Token token);
 static void compile_statement(Compiler *compiler, Statement *stmt);
 
 static void compile_block(Compiler *compiler, Statement *stmt);
@@ -97,88 +97,6 @@ static void emitLoop(Compiler *compiler, int start, SourceSpan span)
         error_report(405, "CompileError: Line %d column %d\nLoop body too large.", span.startline, span.startcol);
 
     writeU16(currentChunk(compiler), jump, span);
-}
-
-static void declareLocal(Compiler *compiler, Token tok)
-{
-    for (int i = compiler->localCount - 1; i >= 0; i--)
-    {
-        Local *local = &compiler->locals[i];
-        if (local->depth < compiler->scopeDepth)
-        {
-            break;
-        }
-
-        if (tok.len == local->name.len && (memcmp(tok.lexeme, local->name.lexeme, tok.len) == 0))
-        {
-            error_report(402, "SyntaxError: Line %d column %d\nAlready a variable with this name in this scope.", tok.line, tok.column);
-        }
-    }
-
-    addLocal(compiler, tok);
-}
-
-static void addLocal(Compiler *compiler, Token token)
-{
-    if (compiler->localCount > UINT16_COUNT)
-    {
-        error_report(403, "MemoryError: Line %d column %d\nToo many local variables in one function.", token.line, token.column);
-    }
-    Local *local = &compiler->locals[compiler->localCount++];
-    local->name = token;
-    local->depth = compiler->scopeDepth;
-}
-
-static int resolveLocal(Compiler *compiler, Token name)
-{
-    for (int i = compiler->localCount - 1; i >= 0; i--)
-    {
-        Local *local = &compiler->locals[i];
-        if (local->name.len == name.len && memcmp(local->name.lexeme, name.lexeme, name.len) == 0)
-        {
-            return i;
-        }
-    }
-
-    return -1;
-}
-
-static void namedVariable(Compiler *compiler, Token name, int canAssign, SourceSpan span)
-{
-    uint8_t setOp, getOp;
-    int arg = resolveLocal(compiler, name);
-
-    if (arg != -1)
-    {
-        getOp = OP_GET_LOCAL;
-        setOp = OP_SET_LOCAL;
-    }
-    else
-    {
-        Value val;
-        val.type = VAL_OBJ;
-        val.obj = (Obj *)allocateString(compiler->vm, name.lexeme, name.len);
-
-        arg = addConstant(currentChunk(compiler), val);
-        setOp = OP_SET_GLOBAL;
-        getOp = OP_GET_GLOBAL;
-    }
-
-    if (canAssign == 1)
-    {
-        writeChunk(currentChunk(compiler), setOp, span);
-        writeU16(currentChunk(compiler), arg, span);
-    }
-    else if (canAssign == 2)
-    {
-        writeChunk(currentChunk(compiler), OP_DEFINE_GLOBAL, span);
-        writeU16(currentChunk(compiler), arg, span);
-    }
-    else
-    {
-        writeChunk(currentChunk(compiler), getOp, span);
-        writeU16(currentChunk(compiler), arg, span);
-    }
 }
 
 static void compile_and(Compiler *compiler, Expression *expr)
@@ -269,14 +187,29 @@ static void compile_expression(Compiler *compiler, Expression *expr)
         break;
     case VARIABLE:
     {
-        namedVariable(compiler, expr->Variable.identifier, 0, expr->span);
+        if (!expr->Variable.isLocal) {
+            writeChunk(&compiler->function->chunk, OP_GET_GLOBAL, expr->span);
+            writeU16(&compiler->function->chunk, expr->Variable.resolvedSlot, expr->span);
+        }
+        else {
+            writeChunk(&compiler->function->chunk, OP_GET_LOCAL, expr->span);
+            writeU16(&compiler->function->chunk, expr->Variable.resolvedSlot, expr->span);
+        }
+
         break;
     }
     case ASSIGNMENT:
     {
         if (expr->Assignment.operator.type != EQUAL)
         {
-            namedVariable(compiler, expr->Assignment.identifier, 0, expr->span);
+            if (expr->Assignment.isLocal) {
+                writeChunk(&compiler->function->chunk, OP_GET_LOCAL, expr->span);
+                writeU16(&compiler->function->chunk, expr->Assignment.resolvedSlot, expr->span);
+            }
+            else {
+                writeChunk(&compiler->function->chunk, OP_GET_GLOBAL, expr->span);
+                writeU16(&compiler->function->chunk, expr->Assignment.resolvedSlot, expr->span);
+            }
         }
 
         compile_expression(compiler, expr->Assignment.value);
@@ -302,7 +235,13 @@ static void compile_expression(Compiler *compiler, Expression *expr)
             break;
         }
 
-        namedVariable(compiler, expr->Assignment.identifier, 1, expr->span);
+        if (!expr->Assignment.isLocal) {
+            writeChunk(&compiler->function->chunk, OP_SET_GLOBAL, expr->span);
+            writeU16(&compiler->function->chunk, expr->Assignment.resolvedSlot, expr->span);
+        } else {
+            writeChunk(&compiler->function->chunk, OP_SET_LOCAL, expr->span);
+            writeU16(&compiler->function->chunk, expr->Assignment.resolvedSlot, expr->span);
+        }
         break;
     }
     case CALL: {
@@ -332,14 +271,15 @@ static void compile_vardecl(Compiler *compiler, Statement *stmt)
     else
         compile_expression(compiler, decl->initializer);
 
-    if (compiler->scopeDepth > 0)
+    if (decl->isLocal)
     {
-        addLocal(compiler, name);
-        namedVariable(compiler, name, 1, stmt->span);
+        writeChunk(&compiler->function->chunk, OP_SET_LOCAL, stmt->span);
+        writeU16(&compiler->function->chunk, decl->resolvedSlot, stmt->span);
         return;
     }
 
-    namedVariable(compiler, name, 2, stmt->span);
+    writeChunk(&compiler->function->chunk, OP_DEFINE_GLOBAL, stmt->span);
+    writeU16(&compiler->function->chunk, decl->resolvedSlot, stmt->span);
 }
 
 static void compile_funcdecl(Compiler *compiler, Statement *stmt) {
@@ -347,14 +287,8 @@ static void compile_funcdecl(Compiler *compiler, Statement *stmt) {
 
     Compiler c = {0};
     c.vm = compiler->vm;
-    c.localCount = 0;
     c.scopeDepth = 1;
     c.currentLoop = NULL;
-    
-    Local *local = &c.locals[c.localCount++];
-    local->depth = 0;
-    local->name.len = 0;
-    local->name.lexeme = "";
 
     c.function = newFunction(compiler->vm);
 
@@ -363,10 +297,6 @@ static void compile_funcdecl(Compiler *compiler, Statement *stmt) {
 
     c.function->arity = funcdecl->arity;
     initChunk(&c.function->chunk);
-
-    for (int i = 0; i < c.function->arity; i++) {
-        declareLocal(&c, funcdecl->parameters[i].identifier);
-    }
     
     Statement blockStmt;
     blockStmt.type = TYPE_BLOCK;
@@ -393,14 +323,15 @@ static void compile_funcdecl(Compiler *compiler, Statement *stmt) {
     int index = addConstant(currentChunk(compiler), val);
     writeU16(currentChunk(compiler), index, stmt->span);
 
-    if (compiler->scopeDepth > 0)
+    if (funcdecl->isLocal)
     {
-        addLocal(compiler, funcdecl->identifier);
-        namedVariable(compiler, funcdecl->identifier, 1, stmt->span);
+        writeChunk(&compiler->function->chunk, OP_SET_LOCAL, stmt->span);
+        writeU16(&compiler->function->chunk, funcdecl->resolvedSlot, stmt->span);
         return;
     }
 
-    namedVariable(compiler, funcdecl->identifier, 2, stmt->span);
+    writeChunk(&compiler->function->chunk, OP_DEFINE_GLOBAL, stmt->span);
+    writeU16(&compiler->function->chunk, funcdecl->resolvedSlot, stmt->span);
 }
 
 static void compile_block_custom(Compiler *compiler, Statement *stmt, int len)
@@ -427,19 +358,6 @@ static void compile_block(Compiler *compiler, Statement *stmt)
     }
 
     compiler->scopeDepth--;
-
-    uint16_t count = 0;
-    while (compiler->localCount > 0 && compiler->locals[compiler->localCount - 1].depth > compiler->scopeDepth)
-    {
-        count++;
-        compiler->localCount--;
-    }
-
-    if (count > 0)
-    {
-        writeChunk(currentChunk(compiler), OP_POPN, stmt->span);
-        writeU16(currentChunk(compiler), count, stmt->span);
-    }
 }
 
 static void compile_if(Compiler *compiler, Statement *statement)
@@ -495,22 +413,7 @@ static void compile_while(Compiler *compiler, Statement *statement)
     context.continueTarget = currentChunk(compiler)->count;
 
     compile_statement(compiler, stmt->body->block->statements[stmt->body->block->count - 1]);
-    compiler->localCount = (compiler->localCount > 0) ? compiler->localCount - 1 : 0;
     compiler->scopeDepth--;
-
-    uint16_t count = 0;
-    while (compiler->localCount > 0 && compiler->locals[compiler->localCount - 1].depth > compiler->scopeDepth)
-    {
-        count++;
-        compiler->localCount--;
-    }
-
-    if (count > 0)
-    {
-        printf("Emitting POP_%d\n", count);
-        writeChunk(currentChunk(compiler), OP_POPN, stmt->body->span);
-        writeU16(currentChunk(compiler), count, stmt->body->span);
-    }
 
     emitLoop(compiler, loopStart, stmt->body->span);
 
@@ -664,6 +567,12 @@ ObjFunction *compile(Compiler *compiler)
 
 Compiler *init_compiler(VM *vm, Program *source)
 {
+    printf("Initiating resolver...\n");
+    Resolver resolver = initResolver();
+    printf("Complete!\n");
+    resolve(&resolver, source);
+    printf("Resolution complete!\n");
+
     Compiler *compiler = malloc(sizeof(Compiler));
 
     if (!compiler)
@@ -676,13 +585,7 @@ Compiler *init_compiler(VM *vm, Program *source)
     compiler->type = TYPE_SCRIPT;
     initChunk(&compiler->function->chunk);
 
-    compiler->localCount = 0;
     compiler->currentLoop = NULL;
-
-    Local *local = &compiler->locals[compiler->localCount++];
-    local->depth = 0;
-    local->name.lexeme = "";
-    local->name.len = 0;
 
     return compiler;
 }

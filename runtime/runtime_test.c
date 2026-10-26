@@ -12,7 +12,9 @@ int main() {
     Program *program = parse(p);
 
     VM *vm = initVM();
+    printf("Initiating compiler...\n");
     Compiler *c = init_compiler(vm, program);
+    printf("Initiated!\n");
 
     ObjFunction *result = compile(c);
 

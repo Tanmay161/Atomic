@@ -185,6 +185,8 @@ static Expression *identifier(Parser *p, Expression *left)
 
     expr->type = VARIABLE;
     expr->Variable.identifier = next;
+    expr->Variable.resolvedSlot = -1;
+    expr->Variable.isLocal = -1;
 
     expr->span.startline = next.line;
     expr->span.startcol = next.column;
@@ -736,6 +738,8 @@ Expression *construct_assignment(Token identifier, Expression *value, Token oper
     expression->Assignment.identifier = identifier;
     expression->Assignment.value = value;
     expression->Assignment.operator = operator;
+    expression->Assignment.resolvedSlot = -1;
+    expression->Assignment.isLocal = -1;
 
     expression->inferred = TYPE_UNKNOWN;
 
@@ -853,6 +857,8 @@ Statement *construct_statement(Expression *expr, Token semicolon, StatementType 
         stmt->varDecl->len = identifier.len;
         stmt->varDecl->type = type;
         stmt->varDecl->initializer = expr;
+        stmt->varDecl->resolvedSlot = -1;
+        stmt->varDecl->resolvedSlot = -1;
 
         stmt->span.startline = identifier.line;
         stmt->span.startcol = identifier.column;
@@ -1062,6 +1068,8 @@ Statement *function_declaration(Parser *p)
     declaration->returnType = returnType.type;
     declaration->identifier = identifier;
     declaration->body = body->block;
+    declaration->resolvedSlot = -1;
+    declaration->isLocal = -1;
 
     final->funcDecl = declaration;
 
