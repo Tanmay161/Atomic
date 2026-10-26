@@ -148,7 +148,7 @@ int resolve_funcdecl(Resolver *resolver, Statement *stmt) {
     printf("relative count: %d\n", GET_COUNT(resolver));
 
     resolver->scope++;
-    resolver->locals = &resolver->localStorage[GET_COUNT(resolver)];
+    resolver->locals = &resolver->locals[GET_COUNT(resolver)];
     resolver->nextLocal = resolver->locals;
 
     Local reserved = {
